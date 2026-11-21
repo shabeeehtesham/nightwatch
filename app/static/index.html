@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NIGHTWATCH</title>
+  <meta name="description" content="Live open-source intelligence globe: flights, ships, satellites, earthquakes, reported incidents, undersea cables.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <!-- jsdelivr resolves globe.gl's dependency tree to three 0.183.2, 0.184.0
+       and 0.185.1; three-globe's `instanceof Camera` check then fails across
+       copies and crashes marker occlusion. Pin every copy to one version. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.185.1/+esm",
+      "globe.gl": "https://cdn.jsdelivr.net/npm/globe.gl@2.46.2/+esm",
+      "satellite.js": "https://cdn.jsdelivr.net/npm/satellite.js@7.1.0/+esm",
+      "https://cdn.jsdelivr.net/npm/three@0.183.2/": "https://cdn.jsdelivr.net/npm/three@0.185.1/",
+      "https://cdn.jsdelivr.net/npm/three@0.184.0/": "https://cdn.jsdelivr.net/npm/three@0.185.1/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="globe"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="radar" viewBox="0 0 40 40" aria-hidden="true">
+        <circle cx="20" cy="20" r="18" />
+        <circle cx="20" cy="20" r="11" />
+        <circle cx="20" cy="20" r="4" />
+        <line x1="20" y1="2" x2="20" y2="38" />
+        <line x1="2" y1="20" x2="38" y2="20" />
+        <path class="sweep" d="M20 20 L20 2 A18 18 0 0 1 35.6 11 Z" />
+      </svg>
+      <div>
+        <h1>NIGHTWATCH</h1>
+        <p>global situational awareness</p>
+      </div>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="clock"><span id="utc">--:--:--</span><small>UTC</small></div>
+  </header>
+
+  <aside class="panel left" id="layers-panel">
+    <h2>// layers</h2>
+    <ul class="layers" id="layers"></ul>
+    <h2>// incident confidence</h2>
+    <div class="chips" id="confidence"></div>
+    <p class="fineprint">Confidence = number of independent outlets reporting the same location.</p>
+  </aside>
+
+  <aside class="panel right" id="intel-panel">
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="incidents" class="active">incidents</button>
+      <button role="tab" data-tab="news">news</button>
+      <button role="tab" data-tab="chokepoints">chokepoints</button>
+    </nav>
+    <section id="tab-incidents" class="tab-body active"></section>
+    <section id="tab-news" class="tab-body"></section>
+    <section id="tab-chokepoints" class="tab-body"></section>
+  </aside>
+
+  <div class="mobile-toggles">
+    <button data-toggle="layers-panel">layers</button>
+    <button data-toggle="intel-panel">intel</button>
+  </div>
+
+  <div class="ticker" aria-label="Latest headlines"><div class="ticker-track" id="ticker"></div></div>
+
+  <div class="detail hidden" id="detail" role="dialog" aria-live="polite"></div>
+
+  <div class="boot" id="boot">
+    <div class="boot-inner">
+      <div class="boot-title">NIGHTWATCH // v0.1</div>
+      <pre id="boot-log"></pre>
+    </div>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
