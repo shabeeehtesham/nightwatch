@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: nightwatch
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: AISSTREAM_API_KEY
+        sync: false
+      - key: WINDY_API_KEY
+        sync: false
