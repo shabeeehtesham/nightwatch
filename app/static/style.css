@@ -238,6 +238,8 @@ button { font-family: inherit; }
 .badge.medium { color: var(--amber); }
 .badge.low { color: var(--muted); }
 .badge.state { color: #c79bff; }
+.badge.ok { color: var(--cyan); }
+.cp .big.muted { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
 
 .cp { border: 1px solid var(--line); padding: 10px; margin-bottom: 8px; }
 .cp header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }

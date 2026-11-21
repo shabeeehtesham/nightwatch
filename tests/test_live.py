@@ -127,6 +127,14 @@ class TestShips:
         assert stats["directions"] == {hormuz.label_a: 1, hormuz.label_b: 1}
         assert stats["by_category"] == {"tanker": 2, "cargo": 1}
 
+    def test_zero_ships_without_regional_coverage_is_not_empty(self):
+        # A ship far from Hormuz but in the Channel: Hormuz has no coverage,
+        # so its 0 must read as "no data", not "no ships"
+        stats = {s["name"]: s for s in chokepoint_stats({1: {"lat": 51.0, "lon": 1.5, "sog": 10, "cog": 45, "category": "cargo"}})}
+        assert stats["Strait of Hormuz"]["total"] == 0
+        assert stats["Strait of Hormuz"]["coverage"] == "none"
+        assert stats["Dover Strait"]["coverage"] == "sparse"
+
     def test_tracker_merges_static_data_into_positions(self, tmp_path, monkeypatch):
         monkeypatch.setattr("app.live.ships.HISTORY_FILE", tmp_path / "h.jsonl")
         t = ShipTracker(api_key="test")

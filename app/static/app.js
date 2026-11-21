@@ -217,7 +217,7 @@ world
   .polygonStrokeColor(() => '#3be8ff')
   .polygonAltitude(0.005)
   .polygonsTransitionDuration(0)
-  .polygonLabel((d) => `<div class="globe-tip">${esc(d.name)} · ${d.total} ships</div>`)
+  .polygonLabel((d) => `<div class="globe-tip">${esc(d.name)} · ${d.coverage === 'none' ? 'no AIS coverage' : `${d.total} ships`}</div>`)
   .onPolygonClick((d) => {
     const [la0, lo0, la1, lo1] = d.box;
     flyTo((la0 + la1) / 2, (lo0 + lo1) / 2, 0.35);
@@ -511,11 +511,21 @@ function renderChokepoints() {
   $('#tab-chokepoints').innerHTML = `${notice}
     <p class="fineprint">Ships inside each box right now, split by heading. A rising Cape of Good Hope count while
     Hormuz / Bab-el-Mandeb fall means traffic is taking the long way round. Warships mostly don't broadcast AIS.</p>
+    <p class="fineprint"><b>Coverage matters:</b> AIS comes from volunteer coastal receivers. A chokepoint marked
+    <span class="badge low">no coverage</span> shows 0 because nobody is reporting from that region, not because
+    the water is empty.</p>
     ${state.chokepoints.map((c) => {
       const dirs = Object.entries(c.directions);
       const moving = Math.max(c.moving, 1);
+      const cov = {
+        none: '<span class="badge low">no coverage</span>',
+        sparse: `<span class="badge medium">sparse · ${c.region_ships} in region</span>`,
+        ok: `<span class="badge ok">covered · ${c.region_ships} in region</span>`,
+      }[c.coverage] || '';
+      const big = c.coverage === 'none' ? '<span class="big muted">no data</span>' : `<span class="big">${c.total}</span>`;
       return `<div class="cp" id="cp-${esc(c.name.replace(/\W+/g, '-'))}">
-        <header><h3>${esc(c.name)}</h3><span class="big">${c.total}</span></header>
+        <header><h3>${esc(c.name)}</h3>${big}</header>
+        ${st?.connected ? cov : ''}
         ${dirs.map(([label, n]) => `
           <div class="bar"><span>${esc(label)}</span><span>${n}</span>
             <div class="track"><div class="fill" style="width:${(n / moving) * 100}%"></div></div></div>`).join('')}

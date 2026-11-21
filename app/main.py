@@ -12,7 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from .live import cables, earthquakes, flights, incidents, news, satellites
 from .live.ships import ShipTracker
 
-load_dotenv()
+# Explicit path: load_dotenv()'s call-stack search misses the file inside
+# uvicorn's --reload worker process.
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 STATIC_DIR = Path(__file__).parent / "static"
 USER_AGENT = "nightwatch-osint/0.1 (+https://github.com/shabeeehtesham/nightwatch)"

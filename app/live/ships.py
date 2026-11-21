@@ -90,9 +90,33 @@ def _angle_diff(a: float, b: float) -> float:
     return abs((a - b + 180) % 360 - 180)
 
 
+def _in_box(box: list[list[float]], lat: float, lon: float) -> bool:
+    (lat0, lon0), (lat1, lon1) = box
+    return lat0 <= lat <= lat1 and lon0 <= lon <= lon1
+
+
+def _watch_region(cp: Chokepoint) -> list[list[float]] | None:
+    lat, lon = (cp.lat_min + cp.lat_max) / 2, (cp.lon_min + cp.lon_max) / 2
+    return next((b for b in WATCH_BOXES if _in_box(b, lat, lon)), None)
+
+
+def coverage_level(region_ships: int) -> str:
+    """aisstream is fed by volunteer coastal receivers, so some regions
+    (the Gulf, the Red Sea) barely report at all. Zero ships in a chokepoint
+    only means "empty" if the surrounding region is reporting traffic -
+    otherwise it means "nobody is listening there"."""
+    if region_ships == 0:
+        return "none"
+    if region_ships < 10:
+        return "sparse"
+    return "ok"
+
+
 def chokepoint_stats(ships: dict[int, dict]) -> list[dict]:
     stats = []
     for cp in CHOKEPOINTS:
+        region = _watch_region(cp)
+        region_ships = sum(1 for s in ships.values() if region and _in_box(region, s["lat"], s["lon"]))
         inside = [s for s in ships.values() if cp.contains(s["lat"], s["lon"])]
         moving = [s for s in inside if (s.get("sog") or 0) >= 1.0 and s.get("cog") is not None]
         toward_a = sum(1 for s in moving if _angle_diff(s["cog"], cp.bearing_a) < 90)
@@ -107,6 +131,8 @@ def chokepoint_stats(ships: dict[int, dict]) -> list[dict]:
             "stationary": len(inside) - len(moving),
             "directions": {cp.label_a: toward_a, cp.label_b: len(moving) - toward_a},
             "by_category": by_cat,
+            "region_ships": region_ships,
+            "coverage": coverage_level(region_ships),
         })
     return stats
 
@@ -189,7 +215,10 @@ class ShipTracker:
     def snapshot_history(self) -> None:
         entry = {
             "t": time.time(),
-            "counts": {c["name"]: {"total": c["total"], "moving": c["moving"]} for c in chokepoint_stats(self.ships)},
+            "counts": {
+                c["name"]: {"total": c["total"], "moving": c["moving"], "region": c["region_ships"]}
+                for c in chokepoint_stats(self.ships)
+            },
         }
         self.history.append(entry)
         HISTORY_FILE.parent.mkdir(exist_ok=True)
