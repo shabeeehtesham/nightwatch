@@ -74,6 +74,10 @@ class TestIncidentCluster:
         rows = [gdelt_row(feature="1"), gdelt_row(feature="2", place="Elsewhere")]
         assert len(incidents.cluster(rows)) == 2
 
+    def test_place_names_lose_stray_cp1252_bytes(self):
+        assert incidents.clean_place("Sanaa, San\x91a', Yemen") == "Sanaa, San'a', Yemen"
+        assert incidents.clean_place("Kyiv\x81, Ukraine") == "Kyiv, Ukraine"
+
     def test_window_stamps_step_back_15_minutes(self):
         stamps = incidents.window_stamps("20261121084500", hours=1)
         assert stamps == ["20261121084500", "20261121083000", "20261121081500", "20261121080000"]

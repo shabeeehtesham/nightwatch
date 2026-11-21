@@ -174,7 +174,7 @@ world
   .pointColor(() => '#ffd166')
   .pointsTransitionDuration(0)
   .pointLabel((q) => `<div class="globe-tip">M${esc(q.mag)} · ${esc(q.place)}</div>`)
-  .onPointClick(showQuake);
+  .onPointClick((q) => { flyToWithCard(q.lat, q.lon); showQuake(q); });
 
 world
   .ringLat('lat')
@@ -193,7 +193,7 @@ world
     const el = document.createElement('div');
     el.className = `marker ${d.confidence}`;
     el.title = d.place;
-    el.addEventListener('click', (e) => { e.stopPropagation(); showIncident(d); });
+    el.addEventListener('click', (e) => { e.stopPropagation(); focusIncident(d); });
     return el;
   });
 
@@ -218,7 +218,11 @@ world
   .polygonAltitude(0.005)
   .polygonsTransitionDuration(0)
   .polygonLabel((d) => `<div class="globe-tip">${esc(d.name)} · ${d.total} ships</div>`)
-  .onPolygonClick((d) => openChokepoint(d.name));
+  .onPolygonClick((d) => {
+    const [la0, lo0, la1, lo1] = d.box;
+    flyTo((la0 + la1) / 2, (lo0 + lo1) / 2, 0.35);
+    openChokepoint(d.name);
+  });
 
 world
   .labelLat('lat')
@@ -465,10 +469,13 @@ function renderIncidents() {
 $('#tab-incidents').addEventListener('click', (e) => {
   const btn = e.target.closest('[data-incident]');
   if (!btn) return;
-  const i = visibleIncidents()[+btn.dataset.incident];
-  flyTo(i.lat, i.lon);
-  showIncident(i);
+  focusIncident(visibleIncidents()[+btn.dataset.incident]);
 });
+
+function focusIncident(i) {
+  flyToWithCard(i.lat, i.lon);
+  showIncident(i);
+}
 
 function renderNews() {
   $('#tab-news').innerHTML = state.news.map((n) => `
@@ -552,6 +559,12 @@ document.querySelector('.mobile-toggles').addEventListener('click', (e) => {
 function flyTo(lat, lng, altitude = 0.9) {
   stopSpin();
   world.pointOfView({ lat, lng, altitude }, 1500);
+}
+
+// Aim a little south of the target so it lands above the detail card,
+// which covers the bottom of the screen.
+function flyToWithCard(lat, lng, altitude = 0.9) {
+  flyTo(Math.max(-85, lat - altitude * 8), lng, altitude);
 }
 
 function showDetail(html) {

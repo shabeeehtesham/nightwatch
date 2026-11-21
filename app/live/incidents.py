@@ -66,6 +66,15 @@ C_LAT, C_LON, C_FEATURE, C_ADDED, C_URL = 56, 57, 58, 59, 60
 C_ACTOR1, C_ACTOR2 = 6, 16
 
 
+# GDELT place names arrive with stray Windows-1252 quote bytes (San\x91a'
+# for Sanaa); map those to plain quotes and drop other C1 control chars.
+_C1_FIX = {0x91: "'", 0x92: "'", 0x93: '"', 0x94: '"', **{c: None for c in range(0x80, 0xA0) if c not in (0x91, 0x92, 0x93, 0x94)}}
+
+
+def clean_place(name: str) -> str:
+    return name.translate(_C1_FIX)
+
+
 def _domain(url: str) -> str:
     return urlparse(url).netloc.lower().removeprefix("www.")
 
@@ -97,7 +106,7 @@ def cluster(rows: list[list[str]]) -> list[dict]:
     for r in rows:
         key = r[C_FEATURE] or f"{r[C_LAT]},{r[C_LON]}"
         p = places.setdefault(key, {
-            "place": r[C_GEO_NAME],
+            "place": clean_place(r[C_GEO_NAME]),
             "country_code": r[C_GEO_CC],
             "lat": float(r[C_LAT]),
             "lon": float(r[C_LON]),
