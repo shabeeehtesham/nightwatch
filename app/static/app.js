@@ -228,7 +228,6 @@ function camThumb(cam) {
   const img = document.createElement('img');
   img.src = cam.source === 'Windy' ? (cam.thumb || cam.image) : freshImage(cam);
   img.alt = '';
-  img.loading = 'lazy';
   if (cam.source !== 'Windy') img.dataset.refresh = cam.image;
   img.addEventListener('error', () => el.classList.add('broken'));
   const label = document.createElement('span');
@@ -953,4 +952,5 @@ setInterval(() => {
 }, 1000);
 
 boot();
+
 
