@@ -51,7 +51,13 @@
   </header>
 
   <aside class="panel left" id="layers-panel">
-    <h2>// layers</h2>
+    <div class="panel-head">
+      <h2>// layers</h2>
+      <div class="bulk" role="group" aria-label="Toggle all layers">
+        <button type="button" data-bulk="all">all</button>
+        <button type="button" data-bulk="none">none</button>
+      </div>
+    </div>
     <ul class="layers" id="layers"></ul>
     <h2>// incident confidence</h2>
     <div class="chips" id="confidence"></div>

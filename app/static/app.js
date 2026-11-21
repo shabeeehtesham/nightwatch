@@ -664,6 +664,15 @@ function renderLayers() {
   });
 }
 
+document.querySelector('.bulk').addEventListener('click', (e) => {
+  const mode = e.target.dataset.bulk;
+  if (!mode) return;
+  const on = mode === 'all';
+  for (const key of Object.keys(LAYERS)) LAYERS[key].on = on;
+  document.querySelectorAll('#layers input[data-layer]').forEach((box) => { box.checked = on; });
+  renderGlobe();
+});
+
 function updateCounts() {
   const counts = {
     flights: state.flights.length,
