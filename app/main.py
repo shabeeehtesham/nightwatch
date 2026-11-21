@@ -5,11 +5,11 @@ from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .live import cables, earthquakes, flights, incidents, news, satellites
+from .live import cables, cameras, earthquakes, flights, incidents, news, satellites
 from .live.ships import ShipTracker
 
 # Explicit path: load_dotenv()'s call-stack search misses the file inside
@@ -20,13 +20,22 @@ STATIC_DIR = Path(__file__).parent / "static"
 USER_AGENT = "nightwatch-osint/0.1 (+https://github.com/shabeeehtesham/nightwatch)"
 
 
+async def _warm(coro):
+    try:
+        await coro
+    except httpx.HTTPError:
+        pass  # the real request will retry and report it
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=20.0)
     app.state.ships = ShipTracker(os.environ.get("AISSTREAM_API_KEY"))
-    tasks = []
+    # Caltrans spreads its cameras over 12 district files (~16s cold); warm
+    # the cache now so the first page load doesn't wait on it.
+    tasks = [asyncio.create_task(_warm(cameras.fixed_cameras(app.state.http)))]
     if app.state.ships.enabled:
-        tasks = [asyncio.create_task(app.state.ships.run()), asyncio.create_task(app.state.ships.maintain())]
+        tasks += [asyncio.create_task(app.state.ships.run()), asyncio.create_task(app.state.ships.maintain())]
     yield
     for t in tasks:
         t.cancel()
@@ -80,9 +89,28 @@ async def live_ships(request: Request):
     return request.app.state.ships.snapshot()
 
 
+@app.get("/api/live/cameras")
+async def live_cameras(request: Request):
+    data = await _upstream(cameras.fixed_cameras(request.app.state.http))
+    return {**data, "windy_enabled": bool(os.environ.get("WINDY_API_KEY"))}
+
+
+@app.get("/api/live/webcams")
+async def live_webcams(request: Request, lat: float = Query(ge=-90, le=90), lon: float = Query(ge=-180, le=180)):
+    key = os.environ.get("WINDY_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="WINDY_API_KEY not set")
+    # Snap to a 1-degree grid so nearby viewports share one cached Windy call
+    return await _upstream(cameras.windy_nearby(round(lat), round(lon), key, request.app.state.http))
+
+
 @app.get("/api/health")
 async def health(request: Request):
-    return {"ok": True, "ships": request.app.state.ships.status()}
+    return {
+        "ok": True,
+        "ships": request.app.state.ships.status(),
+        "windy_enabled": bool(os.environ.get("WINDY_API_KEY")),
+    }
 
 
 @app.get("/")

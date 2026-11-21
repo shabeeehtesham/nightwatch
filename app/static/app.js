@@ -13,6 +13,8 @@ const LAYERS = {
   satellites: { label: 'Satellites', color: '#e8fff2', on: true },
   incidents: { label: 'Reported incidents', color: '#ff4048', on: true },
   earthquakes: { label: 'Earthquakes', color: '#ffd166', on: true },
+  cctv: { label: 'CCTV (public cams)', color: '#ff6bd6', on: true },
+  cctvPreviews: { label: 'CCTV previews', color: '#ff6bd6', on: true },
   chokepoints: { label: 'Chokepoints', color: '#3be8ff', on: true },
   cables: { label: 'Undersea cables', color: '#8f7bff', on: false },
   daynight: { label: 'Day / night', color: '#39ff88', on: true },
@@ -39,6 +41,13 @@ const state = {
   funnel: null,
   news: [],
   cables: [],
+  cameras: [],
+  windyCams: new Map(),
+  windyEnabled: false,
+  windyFetchedAt: new Map(),
+  camPoints: [],
+  previewCams: [],
+  media: null,
   confidence: new Set(['high', 'medium']),
   status: {},
 };
@@ -53,6 +62,18 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
 
 // External feeds supply these URLs - never let a javascript: link through.
 const safeUrl = (u) => (/^https?:\/\//i.test(u || '') ? esc(u) : '#');
+
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180;
+  const a = Math.sin(((lat2 - lat1) * r) / 2) ** 2
+    + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(((lon2 - lon1) * r) / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+
+// TfL and Caltrans overwrite the same image URL every few minutes, so a
+// query-string stamp is needed to get past browser caching. Windy's terms
+// say to use their URLs unmodified, and their URLs are tokenised anyway.
+const freshImage = (cam) => (cam.source === 'Windy' ? cam.image : `${cam.image}?t=${Math.floor(Date.now() / 60_000)}`);
 
 function timeAgo(seconds) {
   if (!seconds) return '';
@@ -164,7 +185,9 @@ world
   .particleAltitude('alt')
   .particlesColor((set) => set.color)
   .particlesSize((set) => set.size)
-  .particlesSizeAttenuation(false);
+  .particlesSizeAttenuation(false)
+  // globe.gl's default hover label reads `.name` off an undefined particle and throws
+  .particleLabel(() => '');
 
 world
   .pointLat('lat')
@@ -189,13 +212,31 @@ world
   .htmlLng('lon')
   .htmlAltitude(0.004)
   .htmlTransitionDuration(0)
-  .htmlElement((d) => {
-    const el = document.createElement('div');
-    el.className = `marker ${d.confidence}`;
-    el.title = d.place;
-    el.addEventListener('click', (e) => { e.stopPropagation(); focusIncident(d); });
-    return el;
-  });
+  .htmlElement((d) => (d.kind === 'cam' ? camThumb(d) : incidentMarker(d)));
+
+function incidentMarker(d) {
+  const el = document.createElement('div');
+  el.className = `marker ${d.confidence}`;
+  el.title = d.place;
+  el.addEventListener('click', (e) => { e.stopPropagation(); focusIncident(d); });
+  return el;
+}
+
+function camThumb(cam) {
+  const el = document.createElement('div');
+  el.className = 'cam-thumb';
+  const img = document.createElement('img');
+  img.src = cam.source === 'Windy' ? (cam.thumb || cam.image) : freshImage(cam);
+  img.alt = '';
+  img.loading = 'lazy';
+  if (cam.source !== 'Windy') img.dataset.refresh = cam.image;
+  img.addEventListener('error', () => el.classList.add('broken'));
+  const label = document.createElement('span');
+  label.textContent = cam.name;
+  el.append(img, label);
+  el.addEventListener('click', (e) => { e.stopPropagation(); focusCamera(cam); });
+  return el;
+}
 
 world
   .pathPoints('coords')
@@ -235,7 +276,122 @@ world
   .labelResolution(2)
   .labelsTransitionDuration(0);
 
-world.onGlobeClick(hideDetail);
+// ~4,000 cameras as clickable meshes would be heavy, so they're drawn as
+// particles and a globe click picks the nearest camera within a
+// zoom-dependent radius instead.
+function handleMapClick(event) {
+  const cam = LAYERS.cctv.on && cameraAtPixel(event);
+  if (cam) focusCamera(cam);
+  else hideDetail();
+}
+
+// A tap right on a camera dot hits the particle, not the globe surface
+world.onGlobeClick((_coords, event) => handleMapClick(event));
+world.onParticleClick((_particle, event) => handleMapClick(event));
+
+function allCameras() {
+  return state.cameras.concat([...state.windyCams.values()]);
+}
+
+function refreshCamPoints() {
+  state.camPoints = allCameras().map((c) => ({ lat: c.lat, lng: c.lon, alt: 0.002 }));
+}
+
+// Only a tap within a few pixels of a dot counts. A distance in km would
+// have to scale with zoom, and at world view it swallowed every click
+// anywhere near London or California.
+const TAP_PX = 14;
+
+function cameraAtPixel(event) {
+  const rect = world.renderer().domElement.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const center = world.toGlobeCoords(x, y);
+  if (!center) return null;
+  const { altitude } = world.pointOfView();
+  const roughKm = altitude * 1500;
+  let best = null;
+  let bestPx = TAP_PX;
+  for (const c of allCameras()) {
+    if (distanceKm(center.lat, center.lng, c.lat, c.lon) > roughKm) continue;
+    const s = world.getScreenCoords(c.lat, c.lon, 0.002);
+    const px = Math.hypot(s.x - x, s.y - y);
+    if (px < bestPx) { best = c; bestPx = px; }
+  }
+  return best;
+}
+
+let zoomTimer;
+world.onZoom((pov) => {
+  clearTimeout(zoomTimer);
+  zoomTimer = setTimeout(() => {
+    updatePreviews(pov);
+    maybeFetchWindy(pov);
+    renderLabels(pov);
+    updateStreetTiles(pov);
+  }, 350);
+});
+
+// The globe texture is a single ~5k image, which turns to mush at city zoom.
+// Below this altitude, switch to Esri World Imagery tiles (street-level
+// satellite photos). CARTO's dark tiles were tried first but now need a key.
+const STREET_TILE_ALTITUDE = 0.18;
+let streetTiles = false;
+
+function updateStreetTiles(pov) {
+  const want = pov.altitude < STREET_TILE_ALTITUDE;
+  if (want === streetTiles) return;
+  streetTiles = want;
+  world.globeTileEngineUrl(want
+    ? (x, y, l) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${l}/${y}/${x}`
+    : null);
+  $('#attribution').hidden = !want;
+}
+
+const PREVIEW_ALTITUDE = 0.3;
+const PREVIEW_MAX = 14;
+
+function updatePreviews(pov = world.pointOfView()) {
+  const picked = [];
+  if (LAYERS.cctv.on && LAYERS.cctvPreviews.on && pov.altitude < PREVIEW_ALTITUDE) {
+    const radius = pov.altitude * 2500;
+    const candidates = allCameras()
+      .map((c) => ({ c, km: distanceKm(pov.lat, pov.lng, c.lat, c.lon) }))
+      .filter((x) => x.km < radius)
+      .sort((a, b) => a.km - b.km);
+    // Greedy spacing: skip any camera whose thumbnail would overlap one
+    // already placed, so a dense junction doesn't become a pile of cards.
+    const placed = [];
+    for (const { c } of candidates) {
+      const s = world.getScreenCoords(c.lat, c.lon, 0.004);
+      if (placed.some((p) => Math.abs(p.x - s.x) < 140 && Math.abs(p.y - s.y) < 100)) continue;
+      placed.push(s);
+      picked.push({ ...c, kind: 'cam' });
+      if (picked.length >= PREVIEW_MAX) break;
+    }
+  }
+  const changed = picked.map((c) => c.id).join() !== state.previewCams.map((c) => c.id).join();
+  state.previewCams = picked;
+  if (changed) renderHtml();
+}
+
+async function maybeFetchWindy(pov) {
+  if (!state.windyEnabled || !LAYERS.cctv.on || pov.altitude > 0.8) return;
+  const key = `${Math.round(pov.lat)},${Math.round(pov.lng)}`;
+  // Windy's free-tier image tokens expire after ~10 minutes
+  if (Date.now() - (state.windyFetchedAt.get(key) || 0) < 8 * 60_000) return;
+  state.windyFetchedAt.set(key, Date.now());
+  try {
+    const cams = await getJSON(`/api/live/webcams?lat=${pov.lat.toFixed(2)}&lon=${pov.lng.toFixed(2)}`);
+    for (const c of cams) state.windyCams.set(c.id, c);
+    refreshCamPoints();
+    renderParticles();
+    updatePreviews();
+    updateCounts();
+  } catch {
+    state.windyFetchedAt.delete(key);
+  }
+}
 
 function visibleIncidents() {
   return state.incidents.filter((i) => state.confidence.has(i.confidence));
@@ -246,7 +402,22 @@ function renderParticles() {
   if (LAYERS.flights.on) sets.push({ color: LAYERS.flights.color, size: 1.6, points: state.flights });
   if (LAYERS.ships.on) sets.push({ color: LAYERS.ships.color, size: 2.2, points: state.ships });
   if (LAYERS.satellites.on) sets.push({ color: LAYERS.satellites.color, size: 2.4, points: state.satPositions });
+  if (LAYERS.cctv.on) sets.push({ color: LAYERS.cctv.color, size: 3, points: state.camPoints });
   world.particlesData(sets);
+}
+
+// Labels are sized in degrees, so close in they swamp the screen - hide them
+// below the zoom level where the chokepoint boxes themselves are obvious.
+function renderLabels(pov = world.pointOfView()) {
+  const show = LAYERS.chokepoints.on && pov.altitude > 0.2;
+  world.labelsData(show
+    ? state.chokepoints.map((c) => ({ name: c.name, lat: c.box[2] + 0.5, lng: (c.box[1] + c.box[3]) / 2 }))
+    : []);
+}
+
+function renderHtml() {
+  const incidents = LAYERS.incidents.on ? visibleIncidents() : [];
+  world.htmlElementsData([...incidents, ...state.previewCams]);
 }
 
 function renderGlobe() {
@@ -255,7 +426,8 @@ function renderGlobe() {
   world.pointsData(LAYERS.earthquakes.on ? state.quakes : []);
 
   const incidents = LAYERS.incidents.on ? visibleIncidents() : [];
-  world.htmlElementsData(incidents);
+  updatePreviews();
+  renderHtml();
 
   const rings = [];
   if (LAYERS.earthquakes.on) {
@@ -280,7 +452,7 @@ function renderGlobe() {
       geometry: { type: 'Polygon', coordinates: [[[lo0, la0], [lo0, la1], [lo1, la1], [lo1, la0], [lo0, la0]]] },
     };
   }));
-  world.labelsData(cps.map((c) => ({ name: c.name, lat: c.box[2] + 0.5, lng: (c.box[1] + c.box[3]) / 2 })));
+  renderLabels();
 
   globeMaterial.uniforms.dayNight.value = LAYERS.daynight.on ? 1.0 : 0.0;
 }
@@ -365,6 +537,17 @@ async function loadCables() {
   return `${state.cables.length.toLocaleString()} cable segments`;
 }
 
+async function loadCameras() {
+  const d = await getJSON('/api/live/cameras');
+  state.cameras = d.cameras.map((r) => ({
+    id: r[0], source: r[1], name: r[2], lat: r[3], lon: r[4], image: r[5], video: r[6], videoKind: r[7],
+  }));
+  state.windyEnabled = d.windy_enabled;
+  refreshCamPoints();
+  const windy = d.windy_enabled ? ' + Windy worldwide on zoom' : ' (Windy offline: no key)';
+  return `${state.cameras.length.toLocaleString()} cams: London ${d.counts.TfL}, California ${d.counts.Caltrans}${windy}`;
+}
+
 const SOURCES = [
   ['flights', 'ADS-B receiver network', loadFlights],
   ['ships', 'AIS maritime feed', loadShips],
@@ -373,6 +556,7 @@ const SOURCES = [
   ['incidents', 'GDELT event stream', loadIncidents],
   ['news', 'wire headlines', loadNews],
   ['cables', 'submarine cable map', loadCables],
+  ['cameras', 'public camera network', loadCameras],
 ];
 
 // ---------- status bar ----------
@@ -422,6 +606,7 @@ function updateCounts() {
     earthquakes: state.quakes.length,
     chokepoints: state.chokepoints.length,
     cables: state.cables.length,
+    cctv: state.camPoints.length,
   };
   for (const [k, v] of Object.entries(counts)) {
     const el = document.getElementById(`count-${k}`);
@@ -578,6 +763,7 @@ function flyToWithCard(lat, lng, altitude = 0.9) {
 }
 
 function showDetail(html) {
+  stopMedia();
   const el = $('#detail');
   el.innerHTML = `<button class="close" aria-label="Close">×</button>${html}`;
   el.classList.remove('hidden');
@@ -585,7 +771,78 @@ function showDetail(html) {
 }
 
 function hideDetail() {
+  stopMedia();
   $('#detail').classList.add('hidden');
+}
+
+// A live HLS stream keeps downloading until it's destroyed, so every card
+// change tears down whatever the previous camera started.
+function stopMedia() {
+  if (!state.media) return;
+  state.media.hls?.destroy();
+  clearInterval(state.media.timer);
+  state.media = null;
+}
+
+function focusCamera(cam) {
+  flyToWithCard(cam.lat, cam.lon, Math.min(world.pointOfView().altitude, 0.12));
+  showCamera(cam);
+}
+
+function cameraMedia(cam) {
+  if (cam.source === 'Windy') {
+    return `<a href="${safeUrl(cam.detail_url)}" target="_blank" rel="noopener noreferrer">
+        <img class="cam-still" src="${safeUrl(cam.image)}" alt="Webcam image: ${esc(cam.name)}"></a>
+      ${cam.player ? `<p><a href="${safeUrl(cam.player)}" target="_blank" rel="noopener noreferrer">open live player on windy.com</a></p>` : ''}
+      <p class="fineprint">Webcams provided by <a href="https://www.windy.com/" target="_blank" rel="noopener noreferrer">Windy.com</a>
+      - <a href="https://www.windy.com/webcams/add" target="_blank" rel="noopener noreferrer">add a webcam</a></p>`;
+  }
+  if (cam.videoKind) {
+    const note = cam.videoKind === 'hls' ? 'live stream' : '~10s clip, refreshed by TfL every few minutes';
+    return `<video class="cam-video" id="cam-video" autoplay muted playsinline controls ${cam.videoKind === 'mp4' ? 'loop' : ''}
+        poster="${safeUrl(freshImage(cam))}"></video>
+      <p class="fineprint">${cam.videoKind === 'hls' ? '<span class="badge high">● live</span> ' : ''}${note}</p>`;
+  }
+  return `<img class="cam-still" id="cam-still" src="${safeUrl(freshImage(cam))}" alt="Camera image: ${esc(cam.name)}">
+    <p class="fineprint">Still image, refreshes every 30s.</p>`;
+}
+
+async function showCamera(cam) {
+  const place = cam.place || (cam.source === 'TfL' ? 'London, UK' : cam.source === 'Caltrans' ? 'California, US' : '');
+  showDetail(`
+    <h3>${esc(cam.name)}</h3>
+    <span class="badge ok">${esc(cam.source)}</span> <span class="fineprint">${esc(place)}</span>
+    <div class="cam-media">${cameraMedia(cam)}</div>`);
+  state.media = {};
+
+  const still = document.getElementById('cam-still');
+  if (still) {
+    state.media.timer = setInterval(() => { still.src = `${cam.image}?t=${Date.now()}`; }, 30_000);
+  }
+  const video = document.getElementById('cam-video');
+  if (!video) return;
+  if (cam.videoKind === 'mp4') {
+    video.src = `${cam.video}?t=${Math.floor(Date.now() / 60_000)}`;
+    return;
+  }
+  if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = cam.video; // Safari plays HLS natively
+    return;
+  }
+  const media = state.media;
+  const { default: Hls } = await import('hls.js');
+  if (state.media !== media) return; // user moved on while hls.js loaded
+  if (!Hls.isSupported()) return;
+  const hls = new Hls({ liveDurationInfinity: true });
+  hls.on(Hls.Events.ERROR, (_e, data) => {
+    if (data.fatal) {
+      hls.destroy();
+      video.replaceWith(Object.assign(document.createElement('img'), { className: 'cam-still', src: freshImage(cam), alt: '' }));
+    }
+  });
+  hls.loadSource(cam.video);
+  hls.attachMedia(video);
+  media.hls = hls;
 }
 
 function showIncident(i) {
@@ -682,6 +939,11 @@ function schedule() {
     if (LAYERS.satellites.on) renderParticles();
   }, 2000);
   setInterval(updateSun, 60_000);
+  setInterval(() => {
+    for (const img of document.querySelectorAll('.cam-thumb img[data-refresh]')) {
+      img.src = `${img.dataset.refresh}?t=${Date.now()}`;
+    }
+  }, 60_000);
 }
 
 $('#boot').addEventListener('click', () => $('#boot').classList.add('done'));
@@ -691,3 +953,4 @@ setInterval(() => {
 }, 1000);
 
 boot();
+
