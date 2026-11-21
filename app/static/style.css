@@ -356,6 +356,9 @@ button { font-family: inherit; }
 
 .cam-media { margin-top: 10px; }
 .cam-still, .cam-video { display: block; width: 100%; max-height: 30vh; object-fit: contain; background: #000; border: 1px solid var(--line); }
+.cam-embed { display: block; width: 100%; aspect-ratio: 16 / 9; max-height: 32vh; border: 1px solid var(--line); background: #000; }
+.cam-thumb.yt { border-color: #ff2d55; box-shadow: 0 0 12px rgba(255, 45, 85, 0.4); }
+.cam-thumb.yt span::before { content: "▶ "; color: #ff2d55; }
 
 .globe-tip {
   background: var(--panel-solid);

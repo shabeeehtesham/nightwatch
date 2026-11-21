@@ -14,7 +14,8 @@ const LAYERS = {
   incidents: { label: 'Reported incidents', color: '#ff4048', on: true },
   earthquakes: { label: 'Earthquakes', color: '#ffd166', on: true },
   cctv: { label: 'CCTV (public cams)', color: '#ff6bd6', on: true },
-  cctvPreviews: { label: 'CCTV previews', color: '#ff6bd6', on: true },
+  youtube: { label: 'YouTube live cams', color: '#ff2d55', on: true },
+  cctvPreviews: { label: 'Camera previews', color: '#ff6bd6', on: true },
   chokepoints: { label: 'Chokepoints', color: '#3be8ff', on: true },
   cables: { label: 'Undersea cables', color: '#8f7bff', on: false },
   daynight: { label: 'Day / night', color: '#39ff88', on: true },
@@ -46,6 +47,8 @@ const state = {
   windyEnabled: false,
   windyFetchedAt: new Map(),
   camPoints: [],
+  ytStreams: [],
+  ytPoints: [],
   previewCams: [],
   media: null,
   confidence: new Set(['high', 'medium']),
@@ -73,7 +76,9 @@ function distanceKm(lat1, lon1, lat2, lon2) {
 // TfL and Caltrans overwrite the same image URL every few minutes, so a
 // query-string stamp is needed to get past browser caching. Windy's terms
 // say to use their URLs unmodified, and their URLs are tokenised anyway.
-const freshImage = (cam) => (cam.source === 'Windy' ? cam.image : `${cam.image}?t=${Math.floor(Date.now() / 60_000)}`);
+const freshImage = (cam) => (cam.source === 'Windy' || cam.source === 'YouTube'
+  ? cam.image
+  : `${cam.image}?t=${Math.floor(Date.now() / 60_000)}`);
 
 function timeAgo(seconds) {
   if (!seconds) return '';
@@ -224,7 +229,7 @@ function incidentMarker(d) {
 
 function camThumb(cam) {
   const el = document.createElement('div');
-  el.className = 'cam-thumb';
+  el.className = cam.source === 'YouTube' ? 'cam-thumb yt' : 'cam-thumb';
   const img = document.createElement('img');
   const src = cam.source === 'Windy' ? (cam.thumb || cam.image) : freshImage(cam);
   if (src) img.src = src; // Windy thumbs fill in once their details batch arrives
@@ -280,7 +285,7 @@ world
 // particles and a globe click picks the nearest camera within a
 // zoom-dependent radius instead.
 function handleMapClick(event) {
-  const cam = LAYERS.cctv.on && cameraAtPixel(event);
+  const cam = cameraAtPixel(event);
   if (cam) focusCamera(cam);
   else hideDetail();
 }
@@ -316,8 +321,14 @@ async function ensureWindyImages(cams) {
 
 const detailedCamera = (cam) => state.windyCams.get(cam.id) || cam;
 
+// Everything a tap or a preview thumbnail can land on, respecting layer toggles
+function pickableCameras() {
+  return (LAYERS.cctv.on ? allCameras() : []).concat(LAYERS.youtube.on ? state.ytStreams : []);
+}
+
 function refreshCamPoints() {
   state.camPoints = allCameras().map((c) => ({ lat: c.lat, lng: c.lon, alt: 0.002 }));
+  state.ytPoints = state.ytStreams.map((c) => ({ lat: c.lat, lng: c.lon, alt: 0.003 }));
 }
 
 // Only a tap within a few pixels of a dot counts. A distance in km would
@@ -335,7 +346,7 @@ function cameraAtPixel(event) {
   const roughKm = altitude * 1500;
   let best = null;
   let bestPx = TAP_PX;
-  for (const c of allCameras()) {
+  for (const c of pickableCameras()) {
     if (distanceKm(center.lat, center.lng, c.lat, c.lon) > roughKm) continue;
     const s = world.getScreenCoords(c.lat, c.lon, 0.002);
     const px = Math.hypot(s.x - x, s.y - y);
@@ -376,9 +387,9 @@ const PREVIEW_MAX = 14;
 
 function updatePreviews(pov = world.pointOfView()) {
   const picked = [];
-  if (LAYERS.cctv.on && LAYERS.cctvPreviews.on && pov.altitude < PREVIEW_ALTITUDE) {
+  if (LAYERS.cctvPreviews.on && pov.altitude < PREVIEW_ALTITUDE) {
     const radius = pov.altitude * 2500;
-    const candidates = allCameras()
+    const candidates = pickableCameras()
       .map((c) => ({ c, km: distanceKm(pov.lat, pov.lng, c.lat, c.lon) }))
       .filter((x) => x.km < radius)
       .sort((a, b) => a.km - b.km);
@@ -438,6 +449,7 @@ function renderParticles() {
   if (LAYERS.ships.on) sets.push({ color: LAYERS.ships.color, size: 2.2, points: state.ships });
   if (LAYERS.satellites.on) sets.push({ color: LAYERS.satellites.color, size: 2.4, points: state.satPositions });
   if (LAYERS.cctv.on) sets.push({ color: LAYERS.cctv.color, size: 3, points: state.camPoints });
+  if (LAYERS.youtube.on) sets.push({ color: LAYERS.youtube.color, size: 6, points: state.ytPoints });
   world.particlesData(sets);
 }
 
@@ -572,6 +584,24 @@ async function loadCables() {
   return `${state.cables.length.toLocaleString()} cable segments`;
 }
 
+async function loadYoutube() {
+  const d = await getJSON('/api/live/youtube');
+  state.ytStreams = d.streams.map((s) => ({
+    id: `yt:${s.id}`,
+    ytId: s.id,
+    source: 'YouTube',
+    name: s.name,
+    place: s.place,
+    channel: s.channel,
+    lat: s.lat,
+    lon: s.lon,
+    image: `https://i.ytimg.com/vi/${s.id}/hqdefault.jpg`,
+  }));
+  refreshCamPoints();
+  const dropped = d.curated - d.available;
+  return `${d.available} live streams${dropped ? ` (${dropped} offline)` : ''}`;
+}
+
 async function loadCameras() {
   const d = await getJSON('/api/live/cameras');
   state.cameras = d.cameras.map((r) => ({
@@ -593,6 +623,7 @@ const SOURCES = [
   ['news', 'wire headlines', loadNews],
   ['cables', 'submarine cable map', loadCables],
   ['cameras', 'public camera network', loadCameras],
+  ['youtube', 'YouTube live cams', loadYoutube],
 ];
 
 // ---------- status bar ----------
@@ -643,6 +674,7 @@ function updateCounts() {
     chokepoints: state.chokepoints.length,
     cables: state.cables.length,
     cctv: state.camPoints.length,
+    youtube: state.ytStreams.length,
   };
   for (const [k, v] of Object.entries(counts)) {
     const el = document.getElementById(`count-${k}`);
@@ -825,11 +857,35 @@ function focusCamera(cam) {
   showCamera(cam);
 }
 
+// Embedded players are restricted to the hosts we expect, so a tampered
+// feed can't drop an arbitrary page into the iframe.
+const embedUrl = (u, host) => {
+  try {
+    const url = new URL(u);
+    return url.protocol === 'https:' && url.hostname === host ? esc(url.href) : null;
+  } catch {
+    return null;
+  }
+};
+
 function cameraMedia(cam) {
+  if (cam.source === 'YouTube') {
+    const id = /^[\w-]{11}$/.test(cam.ytId) ? cam.ytId : '';
+    return `<iframe class="cam-embed" src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&mute=1&playsinline=1"
+        title="${esc(cam.name)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>
+      <p class="fineprint"><span class="badge high">● live</span> ${esc(cam.channel)} on YouTube ·
+        <a href="https://www.youtube.com/watch?v=${id}" target="_blank" rel="noopener noreferrer">open on YouTube</a></p>`;
+  }
   if (cam.source === 'Windy') {
-    return `<a href="${safeUrl(cam.detail_url)}" target="_blank" rel="noopener noreferrer">
-        <img class="cam-still" src="${safeUrl(cam.image)}" alt="Webcam image: ${esc(cam.name)}"></a>
-      ${cam.player ? `<p><a href="${safeUrl(cam.player)}" target="_blank" rel="noopener noreferrer">open live player on windy.com</a></p>` : ''}
+    const player = embedUrl(cam.player, 'webcams.windy.com');
+    const isLive = /\/live$/.test(cam.player || '');
+    const media = player
+      ? `<iframe class="cam-embed" src="${player}" title="${esc(cam.name)}" allow="autoplay; fullscreen" allowfullscreen></iframe>
+         <p class="fineprint">${isLive ? '<span class="badge high">● live</span>' : 'Timelapse of today (this webcam has no live player on our tier)'}
+           · <a href="${safeUrl(cam.detail_url)}" target="_blank" rel="noopener noreferrer">view on windy.com</a></p>`
+      : `<a href="${safeUrl(cam.detail_url)}" target="_blank" rel="noopener noreferrer">
+           <img class="cam-still" src="${safeUrl(cam.image)}" alt="Webcam image: ${esc(cam.name)}"></a>`;
+    return `${media}
       <p class="fineprint">Webcams provided by <a href="https://www.windy.com/" target="_blank" rel="noopener noreferrer">Windy.com</a>
       - <a href="https://www.windy.com/webcams/add" target="_blank" rel="noopener noreferrer">add a webcam</a></p>`;
   }
@@ -1003,6 +1059,7 @@ setInterval(() => {
 }, 1000);
 
 boot();
+
 
 
 

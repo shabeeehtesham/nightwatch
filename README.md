@@ -1,10 +1,10 @@
 # NIGHTWATCH
 
 A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
-reported strikes, public CCTV and undersea cables on one 3D globe, built only
+reported strikes, public CCTV, YouTube live cams and undersea cables on one 3D globe, built only
 from public data feeds.
 
-![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-29%20passing-39ff88?style=flat-square)
+![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-31%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
 
@@ -19,6 +19,7 @@ from public data feeds.
 | Reported incidents | [GDELT 2.0](https://www.gdeltproject.org) event stream, filtered (see below) | 10 min |
 | News | BBC, Al Jazeera, DW, France 24, The Guardian, NPR RSS | 5 min |
 | Public CCTV | ~8,400 cameras: TfL (London clips), Caltrans (California live HLS), DriveBC (British Columbia), Fintraffic (Finland), NZTA (New Zealand), HK Transport Dept, LTA Singapore, and ~1,000 [Windy](https://api.windy.com/webcams) webcams worldwide | live / 30 s stills |
+| YouTube live cams | 37 curated 24/7 landmark streams (Times Square, Shibuya, Venice, Kilauea...), played via the official embed; re-validated through oEmbed every 6h so dead streams drop out | live |
 | Undersea cables | [Submarine Cable Map](https://www.submarinecablemap.com) | daily |
 | Day / night | Computed subsolar point, blended in a custom globe shader | 1 min |
 | Street imagery | [Esri World Imagery](https://www.esri.com) tiles once zoomed in to city level | on zoom |
@@ -72,7 +73,7 @@ uvicorn app.main:app --port 8000
 Open http://localhost:8000.
 
 ```bash
-python -m pytest              # 29 tests: parsers, filters, clustering, chokepoint maths, camera feeds
+python -m pytest              # 31 tests: parsers, filters, clustering, chokepoint maths, camera feeds
 ```
 
 ## Layout

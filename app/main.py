@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .live import cables, cameras, earthquakes, flights, incidents, news, satellites
+from .live import cables, cameras, earthquakes, flights, incidents, news, satellites, youtube
 from .live.ships import ShipTracker
 
 # Explicit path: load_dotenv()'s call-stack search misses the file inside
@@ -102,6 +102,11 @@ async def live_cameras(request: Request):
         "cameras": data["cameras"] + windy,
         "windy_enabled": bool(key),
     }
+
+
+@app.get("/api/live/youtube")
+async def live_youtube(request: Request):
+    return await _upstream(youtube.live_streams(request.app.state.http))
 
 
 @app.get("/api/live/webcams/details")
