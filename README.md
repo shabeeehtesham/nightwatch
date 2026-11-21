@@ -4,7 +4,7 @@ A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
 reported strikes, public CCTV and undersea cables on one 3D globe, built only
 from public data feeds.
 
-![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-25%20passing-39ff88?style=flat-square)
+![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-29%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
 
@@ -18,17 +18,20 @@ from public data feeds.
 | Earthquakes | [USGS](https://earthquake.usgs.gov) M2.5+ feed | 5 min |
 | Reported incidents | [GDELT 2.0](https://www.gdeltproject.org) event stream, filtered (see below) | 10 min |
 | News | BBC, Al Jazeera, DW, France 24, The Guardian, NPR RSS | 5 min |
-| Public CCTV | [TfL JamCams](https://api.tfl.gov.uk) (London clips), [Caltrans](https://cwwp2.dot.ca.gov) (California live HLS), [Windy Webcams](https://api.windy.com/webcams) (worldwide, on zoom) | live / 30 s stills |
+| Public CCTV | ~8,400 cameras: TfL (London clips), Caltrans (California live HLS), DriveBC (British Columbia), Fintraffic (Finland), NZTA (New Zealand), HK Transport Dept, LTA Singapore, and ~1,000 [Windy](https://api.windy.com/webcams) webcams worldwide | live / 30 s stills |
 | Undersea cables | [Submarine Cable Map](https://www.submarinecablemap.com) | daily |
 | Day / night | Computed subsolar point, blended in a custom globe shader | 1 min |
 | Street imagery | [Esri World Imagery](https://www.esri.com) tiles once zoomed in to city level | on zoom |
 
 **CCTV** uses official traffic and tourism cameras only. Sites that stream
-unsecured private cameras are deliberately excluded. About 4,200 cameras are
+unsecured private cameras are deliberately excluded. About 8,400 cameras are
 drawn as particles. A tap is matched to the nearest camera within 14px on
 screen, because a km radius would have to scale with zoom. Zoomed in, live
 thumbnails appear, greedily spaced so they don't stack. California streams
 play live in-browser via hls.js and are torn down when the card closes.
+Windy's worldwide set comes from its map-clusters endpoint as a 12×16 grid of
+tiles (its per-zoom box limits), locations only and cached 6h. Images are
+fetched per camera on demand, because their tokens expire after ~10 minutes.
 
 The **chokepoint monitor** tracks vessel counts and direction of travel through
 Hormuz, Bab-el-Mandeb, Suez, Singapore, Panama, Gibraltar, Dover and the Cape
@@ -69,7 +72,7 @@ uvicorn app.main:app --port 8000
 Open http://localhost:8000.
 
 ```bash
-python -m pytest              # 25 tests: parsers, filters, clustering, chokepoint maths, camera feeds
+python -m pytest              # 29 tests: parsers, filters, clustering, chokepoint maths, camera feeds
 ```
 
 ## Layout

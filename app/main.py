@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
     # Caltrans spreads its cameras over 12 district files (~16s cold); warm
     # the cache now so the first page load doesn't wait on it.
     tasks = [asyncio.create_task(_warm(cameras.fixed_cameras(app.state.http)))]
+    if key := os.environ.get("WINDY_API_KEY"):
+        tasks.append(asyncio.create_task(_warm(cameras.windy_world(key, app.state.http))))
     if app.state.ships.enabled:
         tasks += [asyncio.create_task(app.state.ships.run()), asyncio.create_task(app.state.ships.maintain())]
     yield
@@ -92,7 +94,22 @@ async def live_ships(request: Request):
 @app.get("/api/live/cameras")
 async def live_cameras(request: Request):
     data = await _upstream(cameras.fixed_cameras(request.app.state.http))
-    return {**data, "windy_enabled": bool(os.environ.get("WINDY_API_KEY"))}
+    key = os.environ.get("WINDY_API_KEY")
+    windy = await cameras.windy_world(key, request.app.state.http) if key else []
+    return {
+        **data,
+        "counts": {**data["counts"], "Windy": len(windy)},
+        "cameras": data["cameras"] + windy,
+        "windy_enabled": bool(key),
+    }
+
+
+@app.get("/api/live/webcams/details")
+async def live_webcam_details(request: Request, ids: str = Query(pattern=r"^\d+(,\d+){0,49}$")):
+    key = os.environ.get("WINDY_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503, detail="WINDY_API_KEY not set")
+    return await _upstream(cameras.windy_details([int(i) for i in ids.split(",")], key, request.app.state.http))
 
 
 @app.get("/api/live/webcams")

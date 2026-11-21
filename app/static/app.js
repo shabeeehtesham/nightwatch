@@ -226,7 +226,8 @@ function camThumb(cam) {
   const el = document.createElement('div');
   el.className = 'cam-thumb';
   const img = document.createElement('img');
-  img.src = cam.source === 'Windy' ? (cam.thumb || cam.image) : freshImage(cam);
+  const src = cam.source === 'Windy' ? (cam.thumb || cam.image) : freshImage(cam);
+  if (src) img.src = src; // Windy thumbs fill in once their details batch arrives
   img.alt = '';
   if (cam.source !== 'Windy') img.dataset.refresh = cam.image;
   img.addEventListener('error', () => el.classList.add('broken'));
@@ -288,9 +289,32 @@ function handleMapClick(event) {
 world.onGlobeClick((_coords, event) => handleMapClick(event));
 world.onParticleClick((_particle, event) => handleMapClick(event));
 
+// Windy's worldwide list arrives as locations only; cameras we've fetched
+// full details for (images, player) live in windyCams and take precedence.
 function allCameras() {
-  return state.cameras.concat([...state.windyCams.values()]);
+  const detailed = state.windyCams;
+  return state.cameras.filter((c) => !detailed.has(c.id)).concat([...detailed.values()]);
 }
+
+// Windy image URLs carry a token that expires after ~10 minutes
+const WINDY_IMAGE_TTL = 8 * 60_000;
+const needsWindyImage = (c) => c.source === 'Windy'
+  && (!c.image || Date.now() - (c.fetchedAt || 0) > WINDY_IMAGE_TTL);
+
+async function ensureWindyImages(cams) {
+  const ids = [...new Set(cams.filter(needsWindyImage).map((c) => c.id.split(':')[1]))].slice(0, 50);
+  if (!ids.length) return;
+  const fetchedAt = Date.now();
+  try {
+    for (const c of await getJSON(`/api/live/webcams/details?ids=${ids.join(',')}`)) {
+      state.windyCams.set(c.id, { ...c, fetchedAt });
+    }
+  } catch {
+    // leave them imageless; the card falls back to a link to windy.com
+  }
+}
+
+const detailedCamera = (cam) => state.windyCams.get(cam.id) || cam;
 
 function refreshCamPoints() {
   state.camPoints = allCameras().map((c) => ({ lat: c.lat, lng: c.lon, alt: 0.002 }));
@@ -369,9 +393,20 @@ function updatePreviews(pov = world.pointOfView()) {
       if (picked.length >= PREVIEW_MAX) break;
     }
   }
-  const changed = picked.map((c) => c.id).join() !== state.previewCams.map((c) => c.id).join();
+  const changed = picked.map((c) => c.id + !!c.image).join() !== state.previewCams.map((c) => c.id + !!c.image).join();
   state.previewCams = picked;
   if (changed) renderHtml();
+
+  // Worldwide Windy cams have no image until asked for; fetch the visible
+  // ones in one batch, then redraw with real thumbnails.
+  if (picked.some(needsWindyImage) && !state.windyLoading) {
+    state.windyLoading = true;
+    ensureWindyImages(picked).finally(() => {
+      state.windyLoading = false;
+      state.previewCams = state.previewCams.map((c) => ({ ...detailedCamera(c), kind: 'cam' }));
+      renderHtml();
+    });
+  }
 }
 
 async function maybeFetchWindy(pov) {
@@ -382,7 +417,8 @@ async function maybeFetchWindy(pov) {
   state.windyFetchedAt.set(key, Date.now());
   try {
     const cams = await getJSON(`/api/live/webcams?lat=${pov.lat.toFixed(2)}&lon=${pov.lng.toFixed(2)}`);
-    for (const c of cams) state.windyCams.set(c.id, c);
+    const fetchedAt = Date.now();
+    for (const c of cams) state.windyCams.set(c.id, { ...c, fetchedAt });
     refreshCamPoints();
     renderParticles();
     updatePreviews();
@@ -543,8 +579,9 @@ async function loadCameras() {
   }));
   state.windyEnabled = d.windy_enabled;
   refreshCamPoints();
-  const windy = d.windy_enabled ? ' + Windy worldwide on zoom' : ' (Windy offline: no key)';
-  return `${state.cameras.length.toLocaleString()} cams: London ${d.counts.TfL}, California ${d.counts.Caltrans}${windy}`;
+  const live = Object.values(d.counts).filter(Boolean).length;
+  const windy = d.windy_enabled ? '' : ' (Windy offline: no key)';
+  return `${state.cameras.length.toLocaleString()} cams from ${live} networks${windy}`;
 }
 
 const SOURCES = [
@@ -806,8 +843,22 @@ function cameraMedia(cam) {
     <p class="fineprint">Still image, refreshes every 30s.</p>`;
 }
 
+const SOURCE_REGION = {
+  TfL: 'London, UK',
+  Caltrans: 'California, US',
+  DriveBC: 'British Columbia, Canada',
+  Fintraffic: 'Finland',
+  NZTA: 'New Zealand',
+  'HK Transport Dept': 'Hong Kong',
+  'LTA Singapore': 'Singapore',
+};
+
 async function showCamera(cam) {
-  const place = cam.place || (cam.source === 'TfL' ? 'London, UK' : cam.source === 'Caltrans' ? 'California, US' : '');
+  if (needsWindyImage(cam)) {
+    await ensureWindyImages([cam]);
+    cam = detailedCamera(cam);
+  }
+  const place = cam.place || SOURCE_REGION[cam.source] || '';
   showDetail(`
     <h3>${esc(cam.name)}</h3>
     <span class="badge ok">${esc(cam.source)}</span> <span class="fineprint">${esc(place)}</span>
@@ -952,5 +1003,6 @@ setInterval(() => {
 }, 1000);
 
 boot();
+
 
 
