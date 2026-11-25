@@ -220,7 +220,33 @@ world
   .htmlLng('lon')
   .htmlAltitude(0.004)
   .htmlTransitionDuration(0)
-  .htmlElement((d) => (d.kind === 'cam' ? camThumb(d) : d.kind === 'plane' ? planeMarker(d) : incidentMarker(d)));
+  .htmlElement((d) => {
+    if (d.kind === 'cam') return camThumb(d);
+    if (d.kind === 'plane') return planeMarker(d);
+    if (d.kind === 'airport') return airportMarker(d);
+    return incidentMarker(d);
+  });
+
+world
+  .arcStartLat((a) => a.from.lat)
+  .arcStartLng((a) => a.from.lon)
+  .arcEndLat((a) => a.to.lat)
+  .arcEndLng((a) => a.to.lon)
+  .arcColor(() => ['rgba(255,179,71,0.95)', 'rgba(57,255,136,0.95)'])
+  .arcStroke(0.45)
+  .arcDashLength(0.35)
+  .arcDashGap(0.12)
+  .arcDashAnimateTime(2500)
+  .arcAltitudeAutoScale(0.3)
+  .arcsTransitionDuration(0);
+
+function airportMarker(d) {
+  const el = document.createElement('div');
+  el.className = `airport-marker ${d.role}`;
+  el.innerHTML = `<i></i><span>${esc(d.code)}</span>`;
+  el.title = d.name || d.code;
+  return el;
+}
 
 function incidentMarker(d) {
   const el = document.createElement('div');
@@ -507,8 +533,11 @@ function renderLabels(pov = world.pointOfView()) {
 
 function renderHtml() {
   const incidents = LAYERS.incidents.on ? visibleIncidents() : [];
-  const plane = state.tracked ? [state.tracked] : [];
-  world.htmlElementsData([...incidents, ...state.previewCams, ...plane]);
+  const t = state.tracked;
+  const plane = t ? [t] : [];
+  const airports = t?.route ? t.airportMarkers : [];
+  world.htmlElementsData([...incidents, ...state.previewCams, ...airports, ...plane]);
+  world.arcsData(t?.arc ? [t.arc] : []);
 }
 
 function renderGlobe() {
@@ -1038,12 +1067,123 @@ const rowToFlight = (r) => ({
 function startTracking(row) {
   stopTracking();
   const f = rowToFlight(row);
-  state.tracked = { ...f, kind: 'plane', trail: [[f.lat, f.lon]], follow: true, updated: Date.now() / 1000, lost: false };
+  const t = { ...f, kind: 'plane', trail: [[f.lat, f.lon]], follow: true, updated: Date.now() / 1000, lost: false, route: null, routeState: 'loading' };
+  state.tracked = t;
   flyToWithCard(f.lat, f.lon, Math.min(world.pointOfView().altitude, 0.6));
   renderHtml();
   renderPaths();
   showFlight();
   state.trackTimer = setInterval(pollTracked, TRACK_MS);
+  loadRoute(t);
+}
+
+async function loadRoute(t) {
+  if (!t.callsign || !/^[A-Za-z0-9]{3,8}$/.test(t.callsign)) {
+    t.routeState = 'unknown';
+  } else {
+    try {
+      const { route } = await getJSON(`/api/live/flights/route?callsign=${encodeURIComponent(t.callsign)}`);
+      t.route = route;
+      t.routeState = route ? 'ok' : 'unknown';
+    } catch {
+      t.routeState = 'error';
+    }
+  }
+  if (state.tracked !== t) return;
+  if (t.route) {
+    const { origin: o, destination: d } = t.route;
+    t.arc = { from: o, to: d };
+    t.airportMarkers = [
+      { kind: 'airport', role: 'from', lat: o.lat, lon: o.lon, code: o.iata || o.icao, name: o.name },
+      { kind: 'airport', role: 'to', lat: d.lat, lon: d.lon, code: d.iata || d.icao, name: d.name },
+    ];
+    // Show the whole journey first; "follow" is one tap away
+    const span = distanceKm(o.lat, o.lon, d.lat, d.lon);
+    const mid = midpoint(o, d);
+    t.follow = false;
+    // A phone is narrow, so pull the camera back further to fit both airports
+    const narrow = window.innerWidth < 700 ? 2 : 1;
+    flyToWithCard(mid.lat, mid.lon, Math.min(3.2, Math.max(0.35, (span / 4500) * narrow)));
+  }
+  renderHtml();
+  if (isFlightCardOpen()) showFlight();
+}
+
+// Great-circle midpoint, so a route across the date line doesn't centre on the wrong side of the planet
+function midpoint(a, b) {
+  const r = Math.PI / 180;
+  const [la1, lo1, la2, lo2] = [a.lat * r, a.lon * r, b.lat * r, b.lon * r];
+  const bx = Math.cos(la2) * Math.cos(lo2 - lo1);
+  const by = Math.cos(la2) * Math.sin(lo2 - lo1);
+  const lat = Math.atan2(Math.sin(la1) + Math.sin(la2), Math.hypot(Math.cos(la1) + bx, by));
+  const lon = lo1 + Math.atan2(by, Math.cos(la1) + bx);
+  return { lat: lat / r, lon: (((lon / r) + 540) % 360) - 180 };
+}
+
+const AIRCRAFT_NAMES = {
+  A319: 'Airbus A319', A320: 'Airbus A320', A20N: 'Airbus A320neo', A321: 'Airbus A321', A21N: 'Airbus A321neo',
+  A332: 'Airbus A330-200', A333: 'Airbus A330-300', A339: 'Airbus A330-900neo', A359: 'Airbus A350-900',
+  A35K: 'Airbus A350-1000', A388: 'Airbus A380', BCS1: 'Airbus A220-100', BCS3: 'Airbus A220-300',
+  B737: 'Boeing 737-700', B738: 'Boeing 737-800', B739: 'Boeing 737-900', B38M: 'Boeing 737 MAX 8',
+  B39M: 'Boeing 737 MAX 9', B744: 'Boeing 747-400', B748: 'Boeing 747-8', B752: 'Boeing 757-200',
+  B763: 'Boeing 767-300', B772: 'Boeing 777-200', B77L: 'Boeing 777-200LR', B77W: 'Boeing 777-300ER',
+  B788: 'Boeing 787-8', B789: 'Boeing 787-9', B78X: 'Boeing 787-10', AT72: 'ATR 72', AT75: 'ATR 72-500',
+  AT76: 'ATR 72-600', DH8D: 'Dash 8-400', E190: 'Embraer E190', E195: 'Embraer E195', E75L: 'Embraer E175',
+  CRJ9: 'Bombardier CRJ900',
+};
+
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+const compass = (deg) => COMPASS[Math.round((((deg || 0) % 360) + 360) % 360 / 45) % 8];
+
+function flightPhase(t) {
+  if (t.lost) return 'out of receiver range';
+  if (t.climb > 60) return 'climbing';
+  if (t.climb < -60) return 'descending';
+  if (t.alt_m > 7000) return 'cruising';
+  return t.alt_m < 3000 ? 'low altitude' : 'level flight';
+}
+
+// Where the plane is along the route, and whether that route is believable
+function routeProgress(t) {
+  const { origin: o, destination: d } = t.route;
+  const flown = distanceKm(o.lat, o.lon, t.lat, t.lon);
+  const left = distanceKm(t.lat, t.lon, d.lat, d.lon);
+  const total = distanceKm(o.lat, o.lon, d.lat, d.lon);
+  // Planes don't fly perfectly straight and circle before landing, so allow
+  // some detour - but a plane far off the line means the database is stale
+  const onRoute = (flown + left) / Math.max(total, 1) < 1.4 || left < 80;
+  const kmh = t.speed_ms * 3.6;
+  const minutes = kmh > 100 ? Math.round((left / kmh) * 60) : null;
+  return { flown, left, total, pct: Math.min(100, (flown / Math.max(flown + left, 1)) * 100), onRoute, minutes };
+}
+
+const fmtDuration = (m) => (m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`);
+
+function routeBlock(t) {
+  if (t.routeState === 'loading') return '<p class="route-note">looking up the route…</p>';
+  if (!t.route) {
+    return `<p class="route-note">Route unknown - ${t.routeState === 'error'
+      ? 'the route database is unreachable right now.'
+      : "this flight isn't in the public route database (common for private, cargo and charter flights)."}</p>`;
+  }
+  const { origin: o, destination: d } = t.route;
+  const p = routeProgress(t);
+  return `
+    <div class="route-viz">
+      <div class="ap"><b>${esc(o.iata || o.icao)}</b><span>${esc(o.city || o.name)}</span></div>
+      <div class="route-line" aria-hidden="true">
+        <div class="route-done" style="width:${p.pct.toFixed(1)}%"></div>
+        <div class="route-plane" style="left:${p.pct.toFixed(1)}%">${PLANE_SVG}</div>
+      </div>
+      <div class="ap to"><b>${esc(d.iata || d.icao)}</b><span>${esc(d.city || d.name)}</span></div>
+    </div>
+    <p class="route-stats">
+      <b>${Math.round(p.pct)}%</b> of the way ·
+      ${Math.round(p.flown).toLocaleString()} km flown ·
+      ${Math.round(p.left).toLocaleString()} km to go${p.minutes != null ? ` · about <b>${fmtDuration(p.minutes)}</b> left` : ''}
+    </p>
+    ${p.onRoute ? '' : `<p class="route-warn">⚠ The plane is well off the line between ${esc(o.iata || o.icao)} and
+      ${esc(d.iata || d.icao)}, so this database route may be out of date for today's flight.</p>`}`;
 }
 
 function stopTracking() {
@@ -1061,6 +1201,7 @@ async function pollTracked() {
     const d = await getJSON(`/api/live/flights/position?icao24=${t.icao24}`);
     if (state.tracked !== t) return; // switched planes while waiting
     const f = rowToFlight(d.flight);
+    t.prevAlt = t.alt_m;
     const [lastLat, lastLon] = t.trail[t.trail.length - 1];
     if (f.lat !== lastLat || f.lon !== lastLon) t.trail.push([f.lat, f.lon]);
     Object.assign(t, {
@@ -1072,6 +1213,8 @@ async function pollTracked() {
       lost: false,
     });
     rotatePlane(t);
+    t.climb = f.alt_m - (t.prevAlt ?? f.alt_m);
+    t.prevAlt = f.alt_m;
     if (t.follow) {
       const { altitude } = world.pointOfView();
       world.pointOfView({ lat: Math.max(-85, t.lat - altitude * 8), lng: t.lon, altitude }, 1000);
@@ -1091,29 +1234,39 @@ function showFlight() {
   const t = state.tracked;
   if (!t) return;
   const ft = Math.round(t.alt_m / 0.3048);
-  const kt = Math.round(t.speed_ms / 0.514444);
+  const airline = t.route?.airline;
+  const number = t.route?.flight_number;
+  const title = [airline, number || t.callsign || t.icao24.toUpperCase()].filter(Boolean).join(' ');
+  const aircraft = AIRCRAFT_NAMES[t.type] ? `${AIRCRAFT_NAMES[t.type]} (${t.type})` : (t.type || 'unknown');
   showDetail(`
-    <h3>✈ ${esc(t.callsign || t.icao24.toUpperCase())}</h3>
+    <h3>✈ ${esc(title)} ${number && t.callsign ? `<small class="muted">broadcasting as ${esc(t.callsign)}</small>` : ''}</h3>
     <span class="badge track">${t.lost ? 'signal lost' : 'tracking live'}</span>
-    <dl>
-      <dt>registration</dt><dd>${esc(t.registration || 'unknown')}</dd>
-      <dt>aircraft</dt><dd>${esc(t.type || 'unknown')}</dd>
-      ${t.country ? `<dt>registered in</dt><dd>${esc(t.country)}</dd>` : ''}
-      <dt>altitude</dt><dd>${ft.toLocaleString()} ft (${Math.round(t.alt_m).toLocaleString()} m)</dd>
-      <dt>speed</dt><dd>${kt} kt (${Math.round(t.speed_ms * 3.6)} km/h)</dd>
-      <dt>heading</dt><dd>${esc(t.heading)}°</dd>
-      <dt>position</dt><dd>${t.lat.toFixed(3)}, ${t.lon.toFixed(3)}</dd>
-      <dt>icao hex</dt><dd>${esc(t.icao24)}</dd>
-      <dt>updated</dt><dd>${timeAgo(t.updated)}</dd>
-    </dl>
+    ${routeBlock(t)}
+    <div class="flight-facts">
+      <div><span>height</span><b>${ft.toLocaleString()} ft</b><small>${(t.alt_m / 1000).toFixed(1)} km up</small></div>
+      <div><span>speed</span><b>${Math.round(t.speed_ms * 3.6).toLocaleString()} km/h</b><small>over the ground</small></div>
+      <div><span>heading</span><b>${compass(t.heading)}</b><small>${esc(t.heading)}°</small></div>
+      <div><span>status</span><b>${flightPhase(t)}</b><small>updated ${timeAgo(t.updated)}</small></div>
+    </div>
+    <p class="aircraft-line">${esc(aircraft)}${t.registration ? ` · ${esc(t.registration)}` : ''}</p>
     <div class="card-actions">
       <button type="button" data-act="follow" class="${t.follow ? 'on' : ''}">follow ${t.follow ? 'on' : 'off'}</button>
       <button type="button" data-act="stop">stop tracking</button>
     </div>
-    <a href="https://globe.adsb.fi/?icao=${encodeURIComponent(t.icao24)}" target="_blank" rel="noopener noreferrer">full flight history on adsb.fi</a>
-    <p class="fineprint">Positions come from volunteer ADS-B receivers and refresh every ${TRACK_MS / 1000}s.
-    Gaps over oceans and remote areas are normal.</p>`);
+    <details class="more" ${state.flightMoreOpen ? 'open' : ''}>
+      <summary>more details</summary>
+      <dl>
+        ${t.country ? `<dt>registered in</dt><dd>${esc(t.country)}</dd>` : ''}
+        <dt>position</dt><dd>${t.lat.toFixed(3)}, ${t.lon.toFixed(3)}</dd>
+        <dt>icao hex</dt><dd>${esc(t.icao24)}</dd>
+        ${t.route ? `<dt>from</dt><dd>${esc(t.route.origin.name)}</dd><dt>to</dt><dd>${esc(t.route.destination.name)}</dd>` : ''}
+      </dl>
+      <a href="https://globe.adsb.fi/?icao=${encodeURIComponent(t.icao24)}" target="_blank" rel="noopener noreferrer">full flight history on adsb.fi</a>
+      <p class="fineprint">Positions come from volunteer ADS-B receivers every ${TRACK_MS / 1000}s; gaps over oceans
+      are normal.${t.route ? ' Route from the adsbdb.com community database. Time left = distance ÷ current speed, not the airline\'s ETA.' : ''}</p>
+    </details>`);
   const card = $('#detail');
+  card.querySelector('details.more').addEventListener('toggle', (e) => { state.flightMoreOpen = e.target.open; });
   card.dataset.flight = t.icao24;
   card.querySelector('[data-act="follow"]').addEventListener('click', () => {
     t.follow = !t.follow;

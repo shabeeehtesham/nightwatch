@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .live import cables, cameras, earthquakes, flights, incidents, news, satellites, youtube
+from .live import cables, cameras, earthquakes, flights, incidents, news, routes, satellites, youtube
 from .live.ships import ShipTracker
 
 # Explicit path: load_dotenv()'s call-stack search misses the file inside
@@ -66,6 +66,11 @@ async def live_flights(request: Request):
 async def flight_search(request: Request, q: str = Query(pattern=flights.SEARCH_PATTERN)):
     feed = request.app.state.flights
     return {"query": q, "fields": flights.FIELDS, "results": await feed.find(q)}
+
+
+@app.get("/api/live/flights/route")
+async def flight_route(request: Request, callsign: str = Query(pattern=routes.CALLSIGN_PATTERN)):
+    return {"route": await _upstream(routes.lookup(callsign.upper(), request.app.state.http))}
 
 
 @app.get("/api/live/flights/position")
