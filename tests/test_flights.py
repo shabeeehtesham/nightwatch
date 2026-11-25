@@ -135,3 +135,27 @@ def test_search_falls_back_to_local_snapshot():
     feed._opensky_rows = [["abc123", "UAE123", "UAE", 55.1, 25.2, 11000, 240, 90, None, None]]
     assert asyncio.run(feed.find("uae123"))[0][0] == "abc123"
     assert math.isclose(asyncio.run(feed.position("abc123"))[4], 25.2)
+
+
+def test_ticket_flight_number_is_translated_to_broadcast_callsign():
+    # Google shows IndiGo 7251 as 6E7251; the aircraft broadcasts IGO7251
+    asked = []
+
+    def handler(request: httpx.Request):
+        asked.append(request.url.path)
+        ac = {**BAW1, "hex": "800c4a", "flight": "IGO7251 ", "r": "VT-IRA", "t": "AT76"}
+        return httpx.Response(200, json={"ac": [ac] if "IGO7251" in request.url.path else []})
+
+    [row] = asyncio.run(_feed(handler).find("6E7251"))
+    assert row[1] == "IGO7251" and row[8] == "VT-IRA"
+    assert asked == ["/api/v2/callsign/IGO7251"]
+
+
+def test_iata_conversion_rules():
+    from app.live import airlines
+
+    assert airlines.icao_callsign("ba0117") == "BAW117"  # leading zeros dropped
+    assert airlines.icao_callsign("UAL99") is None       # already ICAO
+    assert airlines.icao_callsign("N24990") is None      # registration, not a flight
+    assert airlines.icao_airline("6e") == "IGO"
+    assert len(set(airlines.IATA_TO_ICAO.values())) == len(airlines.IATA_TO_ICAO)

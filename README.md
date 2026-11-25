@@ -4,7 +4,7 @@ A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
 reported strikes, public CCTV, YouTube live cams and undersea cables on one 3D globe, built only
 from public data feeds.
 
-![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-41%20passing-39ff88?style=flat-square)
+![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-43%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
 
@@ -13,7 +13,7 @@ from public data feeds.
 | Layer | Source | Refresh |
 |---|---|---|
 | Flights | [OpenSky Network](https://opensky-network.org) ADS-B, falling back to an [adsb.fi](https://adsb.fi) regional sweep where OpenSky is unreachable | 2 min |
-| Aircraft search & tracking | Find a plane by flight number, registration or ICAO hex (or list an airline: `UAE`, `BAW`) ([adsb.fi](https://adsb.fi)), then follow it live with a trail | 10 s |
+| Aircraft search & tracking | Find a plane by ticket flight number (`6E7251`, translated to the broadcast `IGO7251`), callsign, registration or ICAO hex, or list an airline (`6E`, `UAE`) ([adsb.fi](https://adsb.fi)), then follow it live with a trail | 10 s |
 | Ships | [aisstream.io](https://aisstream.io) AIS websocket | live |
 | Satellites | [CelesTrak](https://celestrak.org) TLEs, propagated in-browser with satellite.js | every 2 s |
 | Earthquakes | [USGS](https://earthquake.usgs.gov) M2.5+ feed | 5 min |
@@ -74,7 +74,7 @@ uvicorn app.main:app --port 8000
 Open http://localhost:8000.
 
 ```bash
-python -m pytest              # 41 tests: parsers, filters, clustering, chokepoint maths, camera feeds, flight fallback
+python -m pytest              # 43 tests: parsers, filters, clustering, chokepoint maths, camera feeds, flight fallback
 ```
 
 ## Layout

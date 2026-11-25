@@ -21,6 +21,7 @@ import time
 
 import httpx
 
+from . import airlines
 from .cache import ttl_cache
 
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
@@ -165,7 +166,6 @@ class AdsbFi:
 
 SEARCH_PATTERN = r"^[A-Za-z0-9-]{2,10}$"
 HEX_PATTERN = re.compile(r"^[0-9a-fA-F]{6}$")
-AIRLINE_PATTERN = re.compile(r"^[A-Za-z]{3}$")  # ICAO airline code: UAE, BAW, UAL
 
 
 class FlightFeed:
@@ -259,12 +259,16 @@ class FlightFeed:
         the swept regions are found too; the local snapshot is the
         fallback if adsb.fi can't be reached."""
         q = query.strip()
-        # A bare airline code is never a full callsign, so answer it from
-        # the snapshot already in memory without spending adsb.fi requests.
-        if AIRLINE_PATTERN.match(q) and (airline := self._prefix_matches(q)):
+        # A bare airline code (UAE, or 6E from a ticket) is never a full
+        # callsign, so answer it from the snapshot already in memory
+        # without spending adsb.fi requests.
+        if (code := airlines.icao_airline(q)) and (airline := self._prefix_matches(code)):
             return airline[:10]
 
         paths = []
+        # Ticket-style flight numbers (6E7251) are broadcast as ICAO (IGO7251)
+        if translated := airlines.icao_callsign(q):
+            paths.append(f"callsign/{translated}")
         if HEX_PATTERN.match(q):
             paths.append(f"hex/{q.lower()}")
         if "-" in q:
