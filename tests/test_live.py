@@ -91,7 +91,7 @@ class TestFlights:
             ["ghi789", "NOPOS   ", "UAE", 0, 0, None, None, 9000.0, False, 200.0, 0.0, 0, None, 9000.0],
         ]}
         rows = flights.parse_states(payload)
-        assert rows == [["abc123", "UAE123", "UAE", 55.1, 25.2, 11000, 240, 90]]
+        assert rows == [["abc123", "UAE123", "UAE", 55.1, 25.2, 11000, 240, 90, None, None]]
 
 
 class TestNews:

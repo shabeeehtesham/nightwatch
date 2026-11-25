@@ -4,7 +4,7 @@ A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
 reported strikes, public CCTV, YouTube live cams and undersea cables on one 3D globe, built only
 from public data feeds.
 
-![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-31%20passing-39ff88?style=flat-square)
+![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-39%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
 
@@ -12,7 +12,8 @@ from public data feeds.
 
 | Layer | Source | Refresh |
 |---|---|---|
-| Flights | [OpenSky Network](https://opensky-network.org) ADS-B | 2 min |
+| Flights | [OpenSky Network](https://opensky-network.org) ADS-B, falling back to an [adsb.fi](https://adsb.fi) regional sweep where OpenSky is unreachable | 2 min |
+| Aircraft search & tracking | Find a plane by flight number, registration or ICAO hex ([adsb.fi](https://adsb.fi)), then follow it live with a trail | 10 s |
 | Ships | [aisstream.io](https://aisstream.io) AIS websocket | live |
 | Satellites | [CelesTrak](https://celestrak.org) TLEs, propagated in-browser with satellite.js | every 2 s |
 | Earthquakes | [USGS](https://earthquake.usgs.gov) M2.5+ feed | 5 min |
@@ -73,7 +74,7 @@ uvicorn app.main:app --port 8000
 Open http://localhost:8000.
 
 ```bash
-python -m pytest              # 31 tests: parsers, filters, clustering, chokepoint maths, camera feeds
+python -m pytest              # 39 tests: parsers, filters, clustering, chokepoint maths, camera feeds, flight fallback
 ```
 
 ## Layout
@@ -92,6 +93,11 @@ tests/
 - Every upstream call goes through a TTL cache. Concurrent requests share one
   in-flight fetch, which keeps OpenSky's anonymous tier (~100 global snapshots
   a day) from running out.
+- OpenSky doesn't answer requests from many cloud hosts. When it fails, the
+  flights layer switches to adsb.fi's open API. That API only returns
+  aircraft within 250 nm of a point, at 1 request a second, so a background
+  task sweeps 151 overlapping circles over the busy airspace (about 3
+  minutes per pass). The sweep only runs while someone has the map open.
 - Satellite altitude is log-compressed for display. At true scale,
   geostationary satellites would sit behind the camera.
 - AIS is self-reported and receiver coverage is mostly coastal. Naval vessels

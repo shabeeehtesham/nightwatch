@@ -177,6 +177,56 @@ button { font-family: inherit; }
 .swatch { width: 10px; height: 10px; border-radius: 2px; }
 .count { color: var(--muted); font-size: 11px; }
 
+/* ---------- aircraft search ---------- */
+.flight-search { display: flex; gap: 4px; margin-bottom: 6px; }
+.flight-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: rgba(57, 255, 136, 0.04);
+  border: 1px solid var(--line);
+  color: var(--white);
+  font: 12px var(--mono);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.flight-search input::placeholder { color: var(--muted); text-transform: none; }
+.flight-search input:focus { outline: none; border-color: var(--amber); }
+.flight-search button, .card-actions button {
+  padding: 6px 10px;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--amber);
+  font: 11px var(--mono);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.flight-search button:hover, .card-actions button:hover { background: rgba(255, 179, 71, 0.1); }
+.flight-results { list-style: none; margin: 0 0 14px; padding: 0; font-size: 11px; }
+.flight-results li.note { color: var(--muted); padding: 4px 0; }
+.flight-results button {
+  display: block;
+  width: 100%;
+  margin-bottom: 3px;
+  padding: 6px 8px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font: 11px var(--mono);
+  cursor: pointer;
+}
+.flight-results button:hover { border-color: var(--amber); }
+.flight-results b { color: var(--amber); font-weight: normal; }
+
+.card-actions { display: flex; gap: 6px; margin: 10px 0; }
+.card-actions button.on { background: var(--amber); color: var(--bg); }
+.badge.track { color: var(--amber); }
+
+.plane-marker { width: 26px; height: 26px; cursor: pointer; pointer-events: auto; }
+.plane-marker svg { width: 100%; height: 100%; fill: var(--amber); filter: drop-shadow(0 0 6px var(--amber)); transition: transform 0.8s; }
+
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip {
   padding: 4px 10px;

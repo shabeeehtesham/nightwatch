@@ -30,6 +30,7 @@ async def _warm(coro):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http = httpx.AsyncClient(headers={"User-Agent": USER_AGENT}, timeout=20.0)
+    app.state.flights = flights.FlightFeed(app.state.http)
     app.state.ships = ShipTracker(os.environ.get("AISSTREAM_API_KEY"))
     # Caltrans spreads its cameras over 12 district files (~16s cold); warm
     # the cache now so the first page load doesn't wait on it.
@@ -58,7 +59,21 @@ async def _upstream(coro):
 
 @app.get("/api/live/flights")
 async def live_flights(request: Request):
-    return await _upstream(flights.snapshot(request.app.state.http))
+    return await _upstream(request.app.state.flights.snapshot())
+
+
+@app.get("/api/live/flights/search")
+async def flight_search(request: Request, q: str = Query(pattern=flights.SEARCH_PATTERN)):
+    feed = request.app.state.flights
+    return {"query": q, "fields": flights.FIELDS, "results": await feed.find(q)}
+
+
+@app.get("/api/live/flights/position")
+async def flight_position(request: Request, icao24: str = Query(pattern=r"^[0-9a-fA-F]{6}$")):
+    row = await request.app.state.flights.position(icao24)
+    if row is None:
+        raise HTTPException(status_code=404, detail="aircraft not currently visible")
+    return {"fields": flights.FIELDS, "flight": row}
 
 
 @app.get("/api/live/earthquakes")
@@ -130,6 +145,7 @@ async def live_webcams(request: Request, lat: float = Query(ge=-90, le=90), lon:
 async def health(request: Request):
     return {
         "ok": True,
+        "flights": request.app.state.flights.status(),
         "ships": request.app.state.ships.status(),
         "windy_enabled": bool(os.environ.get("WINDY_API_KEY")),
     }

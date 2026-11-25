@@ -31,6 +31,9 @@ const REFRESH_MS = {
 
 const state = {
   flights: [],
+  flightSource: null,
+  tracked: null,
+  trackTimer: null,
   ships: [],
   shipStatus: null,
   chokepoints: [],
@@ -217,7 +220,7 @@ world
   .htmlLng('lon')
   .htmlAltitude(0.004)
   .htmlTransitionDuration(0)
-  .htmlElement((d) => (d.kind === 'cam' ? camThumb(d) : incidentMarker(d)));
+  .htmlElement((d) => (d.kind === 'cam' ? camThumb(d) : d.kind === 'plane' ? planeMarker(d) : incidentMarker(d)));
 
 function incidentMarker(d) {
   const el = document.createElement('div');
@@ -225,6 +228,25 @@ function incidentMarker(d) {
   el.title = d.place;
   el.addEventListener('click', (e) => { e.stopPropagation(); focusIncident(d); });
   return el;
+}
+
+const PLANE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c.8 0 1.3.9 1.3 2v5.2l7.7 4.5v2l-7.7-2.4v5l2.2 1.7V22L12 21l-3.5 1v-2l2.2-1.7v-5L3 16.7v-2l7.7-4.5V4c0-1.1.5-2 1.3-2z"/></svg>';
+
+// The CSS2D renderer owns the marker's own transform (it positions it), so
+// the heading rotation goes on the inner svg instead.
+function planeMarker(d) {
+  const el = document.createElement('div');
+  el.className = 'plane-marker';
+  el.title = d.callsign || d.icao24;
+  el.innerHTML = PLANE_SVG;
+  el.addEventListener('click', (e) => { e.stopPropagation(); showFlight(); });
+  d.el = el;
+  rotatePlane(d);
+  return el;
+}
+
+function rotatePlane(d) {
+  d.el?.querySelector('svg')?.style.setProperty('transform', `rotate(${d.heading || 0}deg)`);
 }
 
 function camThumb(cam) {
@@ -248,11 +270,11 @@ world
   .pathPointLat((p) => p[0])
   .pathPointLng((p) => p[1])
   .pathPointAlt(0.0015)
-  .pathColor((c) => hexA(c.color, 0.6))
-  .pathStroke(null)
-  .pathDashLength(0.04)
-  .pathDashGap(0.015)
-  .pathDashAnimateTime(40_000)
+  .pathColor((c) => hexA(c.color, c.kind === 'trail' ? 0.9 : 0.6))
+  .pathStroke((c) => (c.kind === 'trail' ? 1.2 : null))
+  .pathDashLength((c) => (c.kind === 'trail' ? 1 : 0.04))
+  .pathDashGap((c) => (c.kind === 'trail' ? 0 : 0.015))
+  .pathDashAnimateTime((c) => (c.kind === 'trail' ? 0 : 40_000))
   .pathTransitionDuration(0)
   .pathLabel((c) => `<div class="globe-tip">${esc(c.name)}</div>`);
 
@@ -286,8 +308,10 @@ world
 // zoom-dependent radius instead.
 function handleMapClick(event) {
   const cam = cameraAtPixel(event);
-  if (cam) focusCamera(cam);
-  else hideDetail();
+  if (cam) return focusCamera(cam);
+  const plane = flightAtPixel(event);
+  if (plane) return startTracking(plane.row);
+  hideDetail();
 }
 
 // A tap right on a camera dot hits the particle, not the globe surface
@@ -351,6 +375,25 @@ function cameraAtPixel(event) {
     const s = world.getScreenCoords(c.lat, c.lon, 0.002);
     const px = Math.hypot(s.x - x, s.y - y);
     if (px < bestPx) { best = c; bestPx = px; }
+  }
+  return best;
+}
+
+function flightAtPixel(event) {
+  if (!LAYERS.flights.on) return null;
+  const rect = world.renderer().domElement.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const center = world.toGlobeCoords(x, y);
+  if (!center) return null;
+  const roughKm = world.pointOfView().altitude * 1500;
+  let best = null;
+  let bestPx = TAP_PX;
+  for (const f of state.flights) {
+    if (distanceKm(center.lat, center.lng, f.lat, f.lng) > roughKm) continue;
+    const s = world.getScreenCoords(f.lat, f.lng, f.alt);
+    const px = Math.hypot(s.x - x, s.y - y);
+    if (px < bestPx) { best = f; bestPx = px; }
   }
   return best;
 }
@@ -464,7 +507,8 @@ function renderLabels(pov = world.pointOfView()) {
 
 function renderHtml() {
   const incidents = LAYERS.incidents.on ? visibleIncidents() : [];
-  world.htmlElementsData([...incidents, ...state.previewCams]);
+  const plane = state.tracked ? [state.tracked] : [];
+  world.htmlElementsData([...incidents, ...state.previewCams, ...plane]);
 }
 
 function renderGlobe() {
@@ -487,7 +531,7 @@ function renderGlobe() {
   }
   world.ringsData(rings);
 
-  world.pathsData(LAYERS.cables.on ? state.cables : []);
+  renderPaths();
 
   const cps = LAYERS.chokepoints.on ? state.chokepoints : [];
   world.polygonsData(cps.map((c) => {
@@ -504,12 +548,29 @@ function renderGlobe() {
   globeMaterial.uniforms.dayNight.value = LAYERS.daynight.on ? 1.0 : 0.0;
 }
 
+function renderPaths() {
+  const paths = LAYERS.cables.on ? [...state.cables] : [];
+  const t = state.tracked;
+  if (t && t.trail.length > 1) paths.push({ kind: 'trail', color: LAYERS.flights.color, name: t.callsign || t.icao24, coords: t.trail });
+  world.pathsData(paths);
+}
+
 // ---------- data loaders ----------
+
+let flightsRetry;
 
 async function loadFlights() {
   const d = await getJSON('/api/live/flights');
-  state.flights = d.flights.map((f) => ({ lat: f[4], lng: f[3], alt: 0.012, callsign: f[1] }));
-  return `${d.count.toLocaleString()} aircraft airborne`;
+  state.flights = d.flights.map((f) => ({ lat: f[4], lng: f[3], alt: 0.012, row: f }));
+  state.flightSource = d;
+  // The fallback sweep fills in over a couple of minutes - poll faster until it has
+  clearTimeout(flightsRetry);
+  if (d.warming) {
+    flightsRetry = setTimeout(async () => { await runSource('flights', loadFlights); renderAll(); }, 20_000);
+    return `${d.count.toLocaleString()} aircraft so far · ${d.source} sweep warming up`;
+  }
+  const via = d.coverage === 'global' ? d.source : `${d.source}, ${d.coverage}`;
+  return `${d.count.toLocaleString()} aircraft airborne (${via})`;
 }
 
 async function loadShips() {
@@ -843,6 +904,7 @@ function showDetail(html) {
   stopMedia();
   const el = $('#detail');
   el.innerHTML = `<button class="close" aria-label="Close">×</button>${html}`;
+  delete el.dataset.flight;
   el.classList.remove('hidden');
   el.querySelector('.close').addEventListener('click', hideDetail);
 }
@@ -959,6 +1021,146 @@ async function showCamera(cam) {
   hls.attachMedia(video);
   media.hls = hls;
 }
+
+// ---------- aircraft tracking ----------
+
+const TRACK_MS = 10_000;
+const FLIGHT_QUERY = /^[A-Za-z0-9-]{2,10}$/;
+
+const rowToFlight = (r) => ({
+  icao24: r[0], callsign: r[1], country: r[2], lon: r[3], lat: r[4],
+  alt_m: r[5], speed_ms: r[6], heading: r[7], registration: r[8], type: r[9],
+});
+
+function startTracking(row) {
+  stopTracking();
+  const f = rowToFlight(row);
+  state.tracked = { ...f, kind: 'plane', trail: [[f.lat, f.lon]], follow: true, updated: Date.now() / 1000, lost: false };
+  flyToWithCard(f.lat, f.lon, Math.min(world.pointOfView().altitude, 0.6));
+  renderHtml();
+  renderPaths();
+  showFlight();
+  state.trackTimer = setInterval(pollTracked, TRACK_MS);
+}
+
+function stopTracking() {
+  clearInterval(state.trackTimer);
+  state.trackTimer = null;
+  state.tracked = null;
+  renderHtml();
+  renderPaths();
+}
+
+async function pollTracked() {
+  const t = state.tracked;
+  if (!t) return;
+  try {
+    const d = await getJSON(`/api/live/flights/position?icao24=${t.icao24}`);
+    if (state.tracked !== t) return; // switched planes while waiting
+    const f = rowToFlight(d.flight);
+    const [lastLat, lastLon] = t.trail[t.trail.length - 1];
+    if (f.lat !== lastLat || f.lon !== lastLon) t.trail.push([f.lat, f.lon]);
+    Object.assign(t, {
+      ...f,
+      registration: f.registration || t.registration,
+      type: f.type || t.type,
+      country: f.country || t.country,
+      updated: Date.now() / 1000,
+      lost: false,
+    });
+    rotatePlane(t);
+    if (t.follow) {
+      const { altitude } = world.pointOfView();
+      world.pointOfView({ lat: Math.max(-85, t.lat - altitude * 8), lng: t.lon, altitude }, 1000);
+    }
+    renderHtml();
+    renderPaths();
+  } catch {
+    t.lost = true; // out of receiver range (oceans) or landed
+  }
+  if (isFlightCardOpen()) showFlight();
+}
+
+const isFlightCardOpen = () => !$('#detail').classList.contains('hidden')
+  && $('#detail').dataset.flight === state.tracked?.icao24;
+
+function showFlight() {
+  const t = state.tracked;
+  if (!t) return;
+  const ft = Math.round(t.alt_m / 0.3048);
+  const kt = Math.round(t.speed_ms / 0.514444);
+  showDetail(`
+    <h3>✈ ${esc(t.callsign || t.icao24.toUpperCase())}</h3>
+    <span class="badge track">${t.lost ? 'signal lost' : 'tracking live'}</span>
+    <dl>
+      <dt>registration</dt><dd>${esc(t.registration || 'unknown')}</dd>
+      <dt>aircraft</dt><dd>${esc(t.type || 'unknown')}</dd>
+      ${t.country ? `<dt>registered in</dt><dd>${esc(t.country)}</dd>` : ''}
+      <dt>altitude</dt><dd>${ft.toLocaleString()} ft (${Math.round(t.alt_m).toLocaleString()} m)</dd>
+      <dt>speed</dt><dd>${kt} kt (${Math.round(t.speed_ms * 3.6)} km/h)</dd>
+      <dt>heading</dt><dd>${esc(t.heading)}°</dd>
+      <dt>position</dt><dd>${t.lat.toFixed(3)}, ${t.lon.toFixed(3)}</dd>
+      <dt>icao hex</dt><dd>${esc(t.icao24)}</dd>
+      <dt>updated</dt><dd>${timeAgo(t.updated)}</dd>
+    </dl>
+    <div class="card-actions">
+      <button type="button" data-act="follow" class="${t.follow ? 'on' : ''}">follow ${t.follow ? 'on' : 'off'}</button>
+      <button type="button" data-act="stop">stop tracking</button>
+    </div>
+    <a href="https://globe.adsb.fi/?icao=${encodeURIComponent(t.icao24)}" target="_blank" rel="noopener noreferrer">full flight history on adsb.fi</a>
+    <p class="fineprint">Positions come from volunteer ADS-B receivers and refresh every ${TRACK_MS / 1000}s.
+    Gaps over oceans and remote areas are normal.</p>`);
+  const card = $('#detail');
+  card.dataset.flight = t.icao24;
+  card.querySelector('[data-act="follow"]').addEventListener('click', () => {
+    t.follow = !t.follow;
+    if (t.follow) flyToWithCard(t.lat, t.lon, world.pointOfView().altitude);
+    showFlight();
+  });
+  card.querySelector('[data-act="stop"]').addEventListener('click', () => { stopTracking(); hideDetail(); });
+}
+
+// Dragging the globe means the user wants to look elsewhere - stop snapping back
+document.getElementById('globe').addEventListener('pointerdown', () => {
+  if (state.tracked?.follow) {
+    state.tracked.follow = false;
+    if (isFlightCardOpen()) showFlight();
+  }
+});
+
+function flightResultLine(r) {
+  const f = rowToFlight(r);
+  const bits = [f.type, f.registration, `${Math.round(f.alt_m / 0.3048).toLocaleString()} ft`].filter(Boolean);
+  return `<b>${esc(f.callsign || f.icao24.toUpperCase())}</b> · ${esc(bits.join(' · '))}`;
+}
+
+$('#flight-search').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('#flight-q').value.trim();
+  const out = $('#flight-results');
+  if (!FLIGHT_QUERY.test(q)) {
+    out.innerHTML = '<li class="note">Use a flight number (BAW1), registration (G-EUYS) or 6-character hex.</li>';
+    return;
+  }
+  out.innerHTML = '<li class="note">searching…</li>';
+  try {
+    const d = await getJSON(`/api/live/flights/search?q=${encodeURIComponent(q)}`);
+    if (!d.results.length) {
+      out.innerHTML = `<li class="note">${esc(q.toUpperCase())} isn't airborne or visible to receivers right now.</li>`;
+      return;
+    }
+    out.innerHTML = d.results.map((r, i) => `<li><button type="button" data-i="${i}">${flightResultLine(r)}</button></li>`).join('');
+    out.onclick = (ev) => {
+      const btn = ev.target.closest('button[data-i]');
+      if (!btn) return;
+      document.querySelectorAll('.panel').forEach((p) => p.classList.remove('open')); // mobile: reveal the map
+      startTracking(d.results[+btn.dataset.i]);
+    };
+    if (d.results.length === 1) out.querySelector('button').click();
+  } catch {
+    out.innerHTML = '<li class="note">Search is unavailable right now - try again in a minute.</li>';
+  }
+});
 
 function showIncident(i) {
   const cats = Object.entries(i.categories).map(([k, v]) => `${k} (${v})`).join(', ');
