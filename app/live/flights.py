@@ -128,7 +128,11 @@ async def opensky_snapshot(client: httpx.AsyncClient) -> dict:
 
 class AdsbFi:
     """adsb.fi client that keeps every request (sweep and search) under
-    its documented 1 request/second limit."""
+    its documented 1 request/second limit.
+
+    Someone waiting on a search or a tracked plane matters more than one
+    circle of the background sweep, so urgent requests go first: the sweep
+    holds back while any are waiting."""
 
     MIN_GAP_S = 1.1
 
@@ -136,22 +140,32 @@ class AdsbFi:
         self.client = client
         self._lock = asyncio.Lock()
         self._last = 0.0
+        self._urgent_waiting = 0
 
-    async def get(self, path: str) -> list[dict]:
-        async with self._lock:
-            wait = self._last + self.MIN_GAP_S - time.monotonic()
-            if wait > 0:
-                await asyncio.sleep(wait)
-            try:
-                resp = await self.client.get(f"{ADSBFI_URL}/{path}", timeout=15.0)
-            finally:
-                self._last = time.monotonic()
+    async def get(self, path: str, urgent: bool = True) -> list[dict]:
+        if urgent:
+            self._urgent_waiting += 1
+        try:
+            while not urgent and self._urgent_waiting:
+                await asyncio.sleep(0.2)
+            async with self._lock:
+                wait = self._last + self.MIN_GAP_S - time.monotonic()
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                try:
+                    resp = await self.client.get(f"{ADSBFI_URL}/{path}", timeout=15.0)
+                finally:
+                    self._last = time.monotonic()
+        finally:
+            if urgent:
+                self._urgent_waiting -= 1
         resp.raise_for_status()
         return _aircraft(resp.json())
 
 
 SEARCH_PATTERN = r"^[A-Za-z0-9-]{2,10}$"
 HEX_PATTERN = re.compile(r"^[0-9a-fA-F]{6}$")
+AIRLINE_PATTERN = re.compile(r"^[A-Za-z]{3}$")  # ICAO airline code: UAE, BAW, UAL
 
 
 class FlightFeed:
@@ -212,7 +226,7 @@ class FlightFeed:
         while time.monotonic() - self._last_wanted < SWEEP_IDLE_S:
             for lat, lon in self.points:
                 try:
-                    found = await self.adsb.get(f"lat/{lat}/lon/{lon}/dist/{RADIUS_NM}")
+                    found = await self.adsb.get(f"lat/{lat}/lon/{lon}/dist/{RADIUS_NM}", urgent=False)
                 except (httpx.HTTPError, ValueError):
                     self.sweep_errors += 1
                     continue
@@ -245,6 +259,11 @@ class FlightFeed:
         the swept regions are found too; the local snapshot is the
         fallback if adsb.fi can't be reached."""
         q = query.strip()
+        # A bare airline code is never a full callsign, so answer it from
+        # the snapshot already in memory without spending adsb.fi requests.
+        if AIRLINE_PATTERN.match(q) and (airline := self._prefix_matches(q)):
+            return airline[:10]
+
         paths = []
         if HEX_PATTERN.match(q):
             paths.append(f"hex/{q.lower()}")
@@ -266,13 +285,14 @@ class FlightFeed:
                 break
         if not results:
             results = {r[0]: r for r in self.local_matches(q)}
-        if not results and len(q) >= 2:
-            # An airline code on its own ("UAE", "BAW") isn't a callsign -
-            # list that airline's flights from the current snapshot instead.
-            prefix = q.upper()
-            rows = self._sweep_rows() + self._opensky_rows
-            results = {r[0]: r for r in rows if (r[1] or "").startswith(prefix)}
+        if not results:
+            results = {r[0]: r for r in self._prefix_matches(q)}
         return list(results.values())[:10]
+
+    def _prefix_matches(self, q: str) -> list[list]:
+        prefix = q.upper()
+        rows = {r[0]: r for r in self._opensky_rows + self._sweep_rows()}  # sweep rows carry reg + type
+        return [r for r in rows.values() if (r[1] or "").startswith(prefix)]
 
     async def position(self, icao24: str) -> list | None:
         try:

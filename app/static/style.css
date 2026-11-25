@@ -255,7 +255,7 @@ button { font-family: inherit; }
   color: var(--muted);
   cursor: pointer;
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 1px;
   font-size: 11px;
 }
 .tabs button.active { color: var(--green); border-bottom-color: var(--green); text-shadow: 0 0 8px rgba(57, 255, 136, 0.5); }

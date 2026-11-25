@@ -51,13 +51,6 @@
   </header>
 
   <aside class="panel left" id="layers-panel">
-    <h2>// track aircraft</h2>
-    <form class="flight-search" id="flight-search" autocomplete="off">
-      <input id="flight-q" type="search" maxlength="10" placeholder="BAW1 · G-EUYS · 406a02"
-             aria-label="Flight number, registration or ICAO hex code" spellcheck="false">
-      <button type="submit">find</button>
-    </form>
-    <ul class="flight-results" id="flight-results"></ul>
     <div class="panel-head">
       <h2>// layers</h2>
       <div class="bulk" role="group" aria-label="Toggle all layers">
@@ -76,10 +69,23 @@
       <button role="tab" data-tab="incidents" class="active">incidents</button>
       <button role="tab" data-tab="news">news</button>
       <button role="tab" data-tab="chokepoints">chokepoints</button>
+      <button role="tab" data-tab="flights">flights</button>
     </nav>
     <section id="tab-incidents" class="tab-body active"></section>
     <section id="tab-news" class="tab-body"></section>
     <section id="tab-chokepoints" class="tab-body"></section>
+    <section id="tab-flights" class="tab-body">
+      <form class="flight-search" id="flight-search" autocomplete="off">
+        <input id="flight-q" type="search" maxlength="10" placeholder="UAL99 · N24990 · a2551a · UAE"
+               aria-label="Flight number, registration, ICAO hex code or airline code" spellcheck="false">
+        <button type="submit">track</button>
+      </form>
+      <ul class="flight-results" id="flight-results"></ul>
+      <p class="fineprint">Search by flight number (UAL99), registration (N24990), the plane's 6-character
+      ICAO code (a2551a), or an airline code (UAE) to list its flights in the air. You can also tap any
+      plane dot on the globe.</p>
+      <p class="fineprint" id="flight-source"></p>
+    </section>
   </aside>
 
   <div class="mobile-toggles">

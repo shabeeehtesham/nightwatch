@@ -4,7 +4,7 @@ A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
 reported strikes, public CCTV, YouTube live cams and undersea cables on one 3D globe, built only
 from public data feeds.
 
-![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-40%20passing-39ff88?style=flat-square)
+![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-41%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
 
@@ -74,7 +74,7 @@ uvicorn app.main:app --port 8000
 Open http://localhost:8000.
 
 ```bash
-python -m pytest              # 40 tests: parsers, filters, clustering, chokepoint maths, camera feeds, flight fallback
+python -m pytest              # 41 tests: parsers, filters, clustering, chokepoint maths, camera feeds, flight fallback
 ```
 
 ## Layout

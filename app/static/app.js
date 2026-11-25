@@ -570,6 +570,9 @@ async function loadFlights() {
     return `${d.count.toLocaleString()} aircraft so far · ${d.source} sweep warming up`;
   }
   const via = d.coverage === 'global' ? d.source : `${d.source}, ${d.coverage}`;
+  $('#flight-source').textContent = d.coverage === 'global'
+    ? `Live data: ${d.source}, worldwide.`
+    : `Live data: ${d.source} ${d.coverage} of busy airspace - planes over open ocean may be missing.`;
   return `${d.count.toLocaleString()} aircraft airborne (${via})`;
 }
 

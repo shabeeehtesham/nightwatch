@@ -85,9 +85,12 @@ def test_hex_lookup_goes_first():
     assert asked == ["/api/v2/hex/406a02"]
 
 
-def test_airline_code_lists_that_airlines_flights():
+def test_airline_code_lists_that_airlines_flights_without_upstream_calls():
+    asked = []
+
     def handler(request: httpx.Request):
-        return httpx.Response(200, json={"ac": []})  # "UAE" alone isn't a callsign
+        asked.append(request.url.path)
+        return httpx.Response(200, json={"ac": []})
 
     feed = _feed(handler)
     feed._opensky_rows = [
@@ -96,6 +99,32 @@ def test_airline_code_lists_that_airlines_flights():
         ["def456", "BAW1", "GB", 0.0, 51.0, 3000, 120, 90, None, None],
     ]
     assert sorted(r[1] for r in asyncio.run(feed.find("uae"))) == ["UAE123", "UAE7"]
+    assert asked == []
+
+
+def test_search_jumps_ahead_of_the_sweep():
+    order = []
+
+    def handler(request: httpx.Request):
+        order.append("search" if "/callsign/" in request.url.path else "sweep")
+        return httpx.Response(200, json={"ac": [], "aircraft": []})
+
+    async def run():
+        feed = _feed(handler)
+        feed.adsb.MIN_GAP_S = 0.05
+        async def sweep():  # like the real sweep: one circle after another
+            for i in range(5):
+                await feed.adsb.get(f"lat/{i}/lon/0/dist/250", urgent=False)
+
+        task = asyncio.create_task(sweep())
+        await asyncio.sleep(0.01)  # first sweep request is already in flight
+        await feed.adsb.get("callsign/BAW1")
+        await task
+
+    asyncio.run(run())
+    # at most the sweep request already holding the rate-limit slot finishes
+    # first; the search must not wait behind the rest of the sweep
+    assert order.index("search") <= 2 and order[-1] == "sweep"
 
 
 def test_search_falls_back_to_local_snapshot():
