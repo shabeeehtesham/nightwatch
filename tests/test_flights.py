@@ -85,6 +85,19 @@ def test_hex_lookup_goes_first():
     assert asked == ["/api/v2/hex/406a02"]
 
 
+def test_airline_code_lists_that_airlines_flights():
+    def handler(request: httpx.Request):
+        return httpx.Response(200, json={"ac": []})  # "UAE" alone isn't a callsign
+
+    feed = _feed(handler)
+    feed._opensky_rows = [
+        ["abc123", "UAE123", "UAE", 55.1, 25.2, 11000, 240, 90, None, None],
+        ["abc124", "UAE7", "UAE", 50.0, 26.0, 9000, 230, 80, None, None],
+        ["def456", "BAW1", "GB", 0.0, 51.0, 3000, 120, 90, None, None],
+    ]
+    assert sorted(r[1] for r in asyncio.run(feed.find("uae"))) == ["UAE123", "UAE7"]
+
+
 def test_search_falls_back_to_local_snapshot():
     def handler(request: httpx.Request):
         raise httpx.ConnectError("down", request=request)

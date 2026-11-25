@@ -266,6 +266,12 @@ class FlightFeed:
                 break
         if not results:
             results = {r[0]: r for r in self.local_matches(q)}
+        if not results and len(q) >= 2:
+            # An airline code on its own ("UAE", "BAW") isn't a callsign -
+            # list that airline's flights from the current snapshot instead.
+            prefix = q.upper()
+            rows = self._sweep_rows() + self._opensky_rows
+            results = {r[0]: r for r in rows if (r[1] or "").startswith(prefix)}
         return list(results.values())[:10]
 
     async def position(self, icao24: str) -> list | None:
