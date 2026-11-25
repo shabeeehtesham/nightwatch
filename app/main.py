@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .live import cables, cameras, earthquakes, flights, incidents, news, routes, satellites, youtube
+from .live import airlines, cables, cameras, earthquakes, flights, incidents, news, routes, satellites, youtube
 from .live.ships import ShipTracker
 
 # Explicit path: load_dotenv()'s call-stack search misses the file inside
@@ -65,7 +66,18 @@ async def live_flights(request: Request):
 @app.get("/api/live/flights/search")
 async def flight_search(request: Request, q: str = Query(pattern=flights.SEARCH_PATTERN)):
     feed = request.app.state.flights
-    return {"query": q, "fields": flights.FIELDS, "results": await feed.find(q)}
+    results = await feed.find(q)
+    route = None
+    if not results:
+        # Not visible right now - say what the flight is, if the route database knows it,
+        # so "not found" doesn't look like the search is broken
+        callsign = airlines.icao_callsign(q) or q.upper()
+        if re.fullmatch(routes.CALLSIGN_PATTERN, callsign):
+            try:
+                route = await routes.lookup(callsign, request.app.state.http)
+            except httpx.HTTPError:
+                pass
+    return {"query": q, "fields": flights.FIELDS, "results": results, "route": route}
 
 
 @app.get("/api/live/flights/route")

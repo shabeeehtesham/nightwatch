@@ -1302,7 +1302,15 @@ $('#flight-search').addEventListener('submit', async (e) => {
   try {
     const d = await getJSON(`/api/live/flights/search?q=${encodeURIComponent(q)}`);
     if (!d.results.length) {
-      out.innerHTML = `<li class="note">${esc(q.toUpperCase())} isn't airborne or visible to receivers right now.</li>`;
+      const r = d.route;
+      const known = r
+        ? `<b>${esc(r.flight_number || r.callsign)}</b> is ${esc(r.airline || 'a flight')} from
+           ${esc(r.origin.city || r.origin.name)} (${esc(r.origin.iata || r.origin.icao)}) to
+           ${esc(r.destination.city || r.destination.name)} (${esc(r.destination.iata || r.destination.icao)}), but `
+        : `${esc(q.toUpperCase())} `;
+      out.innerHTML = `<li class="note">${known}it isn't visible right now. Usually that means it's not in the air
+        (not departed yet, or already landed), or it's flying where there are no receivers - oceans and
+        parts of Africa and Asia. Try again during the flight.</li>`;
       return;
     }
     out.innerHTML = d.results.map((r, i) => `<li><button type="button" data-i="${i}">${flightResultLine(r)}</button></li>`).join('');
