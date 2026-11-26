@@ -4,6 +4,8 @@ A live open-source intelligence globe. Flights, ships, satellites, earthquakes,
 reported strikes, public CCTV, YouTube live cams and undersea cables on one 3D globe, built only
 from public data feeds.
 
+**Live:** https://140-245-227-191.sslip.io
+
 ![stack](https://img.shields.io/badge/python-FastAPI-39ff88?style=flat-square) ![stack](https://img.shields.io/badge/frontend-globe.gl%20%2B%20three.js-39ff88?style=flat-square) ![tests](https://img.shields.io/badge/tests-47%20passing-39ff88?style=flat-square)
 
 ![NIGHTWATCH - reported incident detail over the Middle East](docs/preview.png)
@@ -86,7 +88,19 @@ app/
   recon/               domain / username recon modules (UI tab in progress)
   static/              globe UI - plain ES modules, no build step
 tests/
+deploy/                Oracle server auto-update script + systemd timer
 ```
+
+## Hosting
+
+Runs on an Oracle Cloud Always Free VM (1 OCPU, 1 GB) as a Docker container,
+behind Caddy for HTTPS. A shared-IP host like Render works for everything
+except ships, because aisstream rate-limits by IP.
+
+Deploys are pull-based. GitHub Actions runs the tests on every push, and a
+systemd timer on the server (`deploy/`) checks every 2 minutes for a new
+commit on `main`. It deploys only once that commit's tests have passed, so
+GitHub never needs a key to the server.
 
 ## Notes
 

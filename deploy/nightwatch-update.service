@@ -1,0 +1,8 @@
+[Unit]
+Description=Deploy the latest tested NIGHTWATCH commit
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+ExecStart=/usr/bin/flock -n /tmp/nightwatch-update.lock /bin/sh /home/ubuntu/nightwatch/deploy/oracle_update.sh
