@@ -1,0 +1,8 @@
+# Caddy sits in front of the app on the Oracle server. It gets and renews
+# free HTTPS certificates for both names by itself.
+#   nightwatch-sh.duckdns.org   - main name (DuckDNS, free)
+#   140-245-227-191.sslip.io    - backup name that works with no DNS account
+nightwatch-sh.duckdns.org, 140-245-227-191.sslip.io {
+	encode gzip
+	reverse_proxy localhost:7860
+}
